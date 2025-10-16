@@ -8,16 +8,17 @@ import { Timeline } from "@/components/timeline/Timeline";
 import { ClientOnly } from "@/components/ui/ClientOnly";
 
 /**
- * Notes:
- * - Top minSize 12% → can shrink A LOT (so timeline can grow).
- * - Bottom minSize 10% → can also shrink enough.
- * - No rounding/snap here to avoid fighting the user. (You can add gentle
- *   snap later with step=2 if you want.)
+ * ResizableShell - Main layout component with persistent panel sizing
+ * Features:
+ * - Horizontal layout: Assets (15%) | Player (70%) | Inspector (15%)
+ * - Vertical layout: Main panels (80%) | Timeline (20%)
+ * - Persistent layout via localStorage
+ * - Hydration-safe with ClientOnly wrapper
  */
 export function ResizableShell() {
   return (
     <ClientOnly fallback={
-      <div className="h-[calc(100vh-48px)] w-screen flex">
+      <div className="h-[calc(100vh-32px)] w-screen flex">
         <div className="flex-1 bg-[var(--surface-primary)] border border-[var(--border-primary)] rounded-lg m-2">
           <div className="p-4 text-sm text-[var(--text-tertiary)]">Loading editor...</div>
         </div>
@@ -30,8 +31,8 @@ export function ResizableShell() {
 
 function ResizableShellContent() {
   // Use consistent initial values to prevent hydration mismatch
-  const [hLayout, setHLayout] = React.useState<number[]>([20, 60, 20]);
-  const [vLayout, setVLayout] = React.useState<number[]>([70, 30]);
+  const [hLayout, setHLayout] = React.useState<number[]>([15, 70, 15]);
+  const [vLayout, setVLayout] = React.useState<number[]>([80, 20]);
 
   // Load from localStorage after hydration
   React.useEffect(() => {
@@ -41,16 +42,16 @@ function ResizableShellContent() {
     if (savedHLayout) {
       try {
         setHLayout(JSON.parse(savedHLayout));
-      } catch (e) {
-        console.warn("Failed to parse hLayout from localStorage");
+      } catch {
+        // Invalid layout data, use defaults
       }
     }
     
     if (savedVLayout) {
       try {
         setVLayout(JSON.parse(savedVLayout));
-      } catch (e) {
-        console.warn("Failed to parse vLayout from localStorage");
+      } catch {
+        // Invalid layout data, use defaults
       }
     }
   }, []);
@@ -67,31 +68,31 @@ function ResizableShellContent() {
   }, []);
 
   return (
-    <div className="h-[calc(100vh-48px)] w-screen">
+    <div className="h-[calc(100vh-32px)] w-screen">
       <PanelGroup
         direction="vertical"
         layout={vLayout}
         onLayout={handleVLayoutChange}
       >
         {/* TOP: Assets | Player | Inspector */}
-        <Panel minSize={12}>
+        <Panel minSize={8}>
           <PanelGroup
             direction="horizontal"
             layout={hLayout}
             onLayout={handleHLayoutChange}
           >
-            <Panel minSize={14}><AssetsPanel /></Panel>
+            <Panel minSize={10}><AssetsPanel /></Panel>
             <PanelResizeHandle className="ResizeHandle" />
-            <Panel minSize={36}><PreviewPanel /></Panel>
+            <Panel minSize={50}><PreviewPanel /></Panel>
             <PanelResizeHandle className="ResizeHandle" />
-            <Panel minSize={14}><InspectorPanel /></Panel>
+            <Panel minSize={10}><InspectorPanel /></Panel>
           </PanelGroup>
         </Panel>
 
         <PanelResizeHandle className="ResizeHandle" />
 
         {/* BOTTOM: Timeline */}
-        <Panel minSize={10}>
+        <Panel minSize={8}>
           <Timeline />
         </Panel>
       </PanelGroup>

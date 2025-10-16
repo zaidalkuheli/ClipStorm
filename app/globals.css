@@ -469,55 +469,63 @@ select:focus option {
   border-bottom: 1px solid var(--border-primary);
 }
 
-/* Track Container */
-.track-container {
+/* Timeline Numbers */
+.timeline-numbers {
   display: flex;
-  align-items: center;
-  height: 40px;
-  margin-bottom: 8px;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0 0;
 }
 
-.track-label {
-  width: 80px;
+/* Compact Track Container */
+.track-container-compact {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  margin-bottom: 4px;
+}
+
+.track-label-compact {
+  width: 60px;
   flex-shrink: 0;
-  padding-right: 12px;
+  padding-right: 8px;
   display: flex;
   align-items: center;
 }
 
-.track-content {
+.track-content-compact {
   flex: 1;
   height: 100%;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   position: relative;
 }
 
-/* Timeline Clips */
-.timeline-clip {
-  height: 32px;
-  min-width: 60px;
-  border-radius: 6px;
+/* Compact Timeline Clips */
+.timeline-clip-compact {
+  height: 24px;
+  min-width: 50px;
+  border-radius: 4px;
   display: flex;
   align-items: center;
-  padding: 0 8px;
+  padding: 0 6px;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   overflow: hidden;
 }
 
-.timeline-clip:hover {
+.timeline-clip-compact:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
-.timeline-clip:active {
+.timeline-clip-compact:active {
   transform: translateY(0);
 }
 
-.clip-content {
+.clip-content-compact {
   display: flex;
   align-items: center;
   width: 100%;
@@ -588,6 +596,65 @@ select:focus option {
 .ruler-marker.minor:nth-child(18) { left: 85%; }
 .ruler-marker.minor:nth-child(19) { left: 90%; }
 .ruler-marker.major:nth-child(20) { left: 95%; }
+
+/* Ultra-Minimal Ruler */
+.ruler-minimal { 
+  height: 16px; 
+  border-top: 1px solid var(--border-primary); 
+  background: var(--surface-secondary);
+  display: flex; 
+  align-items: center; 
+  padding: 0 var(--space-lg); 
+  position: relative;
+}
+
+.ruler-markers-minimal {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.ruler-marker-minimal {
+  position: absolute;
+  top: 0;
+  height: 100%;
+}
+
+.ruler-marker-minimal.major {
+  width: 1px;
+  background: var(--text-tertiary);
+  height: 100%;
+}
+
+.ruler-marker-minimal.minor {
+  width: 1px;
+  background: var(--border-primary);
+  height: 50%;
+  top: 25%;
+}
+
+.ruler-marker-minimal.major:nth-child(1) { left: 0%; }
+.ruler-marker-minimal.minor:nth-child(2) { left: 5%; }
+.ruler-marker-minimal.minor:nth-child(3) { left: 10%; }
+.ruler-marker-minimal.minor:nth-child(4) { left: 15%; }
+.ruler-marker-minimal.major:nth-child(5) { left: 20%; }
+.ruler-marker-minimal.minor:nth-child(6) { left: 25%; }
+.ruler-marker-minimal.minor:nth-child(7) { left: 30%; }
+.ruler-marker-minimal.minor:nth-child(8) { left: 35%; }
+.ruler-marker-minimal.minor:nth-child(9) { left: 40%; }
+.ruler-marker-minimal.major:nth-child(10) { left: 45%; }
+.ruler-marker-minimal.minor:nth-child(11) { left: 50%; }
+.ruler-marker-minimal.minor:nth-child(12) { left: 55%; }
+.ruler-marker-minimal.minor:nth-child(13) { left: 60%; }
+.ruler-marker-minimal.minor:nth-child(14) { left: 65%; }
+.ruler-marker-minimal.major:nth-child(15) { left: 70%; }
+.ruler-marker-minimal.minor:nth-child(16) { left: 75%; }
+.ruler-marker-minimal.minor:nth-child(17) { left: 80%; }
+.ruler-marker-minimal.minor:nth-child(18) { left: 85%; }
+.ruler-marker-minimal.minor:nth-child(19) { left: 90%; }
+.ruler-marker-minimal.major:nth-child(20) { left: 95%; }
 
 .playhead { 
   position: absolute; 
@@ -681,4 +748,171 @@ select:focus option {
 /* Subtle hover ring on player for premium feel */
 .preview-surface:hover { 
   box-shadow: 0 0 0 1px var(--ring) inset; 
+}
+
+/* ====== Timeline Scroll Optimization ====== */
+/* smoother horizontal scroll on trackpads */
+* { 
+  overscroll-behavior-x: contain; 
+}
+
+/* ====== Timeline Text Selection Prevention ====== */
+/* Prevent text selection in timeline components */
+.timeline-container,
+.timeline-container * {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+/* ====== Timeline Scroll Zoom ====== */
+.timeline-scroll-area {
+  scroll-behavior: smooth;
+  cursor: grab;
+}
+
+.timeline-scroll-area:active {
+  cursor: grabbing;
+}
+
+/* ====== Enhanced Timeline Scrollbar ====== */
+.timeline-scroll-area::-webkit-scrollbar {
+  height: 16px; /* Bigger scrollbar for easier grabbing */
+}
+
+.timeline-scroll-area::-webkit-scrollbar-track {
+  background: var(--surface-secondary);
+  border-radius: 8px;
+}
+
+.timeline-scroll-area::-webkit-scrollbar-thumb {
+  background: var(--surface-tertiary); /* Default inactive color */
+  border-radius: 8px;
+  border: 2px solid var(--surface-secondary);
+  min-width: 50px; /* Minimum thumb width for easier grabbing */
+  transition: background-color 0.2s ease;
+}
+
+.timeline-scroll-area::-webkit-scrollbar-thumb:hover {
+  background: var(--brand-primary); /* Only active on hover */
+}
+
+.timeline-scroll-area::-webkit-scrollbar-thumb:active {
+  background: var(--brand-secondary); /* Active when dragging */
+}
+
+/* Firefox scrollbar styling */
+.timeline-scroll-area {
+  scrollbar-width: thick;
+  scrollbar-color: var(--surface-tertiary) var(--surface-secondary);
+}
+
+/* ====== Magnetic Linking Visual Effects ====== */
+.scene-edge {
+  position: absolute;
+  top: -2px; 
+  bottom: -2px; 
+  width: 2px;
+  border-radius: 2px;
+  opacity: 0; 
+  transform: scaleY(.85);
+  transition: opacity .12s ease, transform .12s ease;
+}
+
+.scene-edge.left  { left: -2px; }
+.scene-edge.right { right: -2px; }
+
+.scene-edge.magnet-on {
+  opacity: 1;
+  transform: scaleY(1);
+  background: rgba(99, 102, 241, .7); /* indigo glow */
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, .18);
+}
+
+/* ====== Magnetic Snap Animation ====== */
+@keyframes magnetic-snap {
+  0% {
+    transform: scaleY(1) scaleX(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scaleY(1.2) scaleX(1.1);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scaleY(1) scaleX(1);
+    opacity: 1;
+  }
+}
+
+.scene-edge.snap-animation {
+  animation: magnetic-snap 0.3s ease-out;
+}
+
+/* Subtle pulse for the entire scene block when it snaps */
+@keyframes scene-snap-pulse {
+  0% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+  50% {
+    transform: scale(1.02);
+    filter: brightness(1.05);
+  }
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+}
+
+.timeline-scene.snap-animation {
+  animation: scene-snap-pulse 0.4s ease-out;
+}
+
+/* ====== Performance Optimizations ====== */
+/* Optimize rendering for smooth animations */
+.playhead-line {
+  will-change: transform;
+  transform: translateZ(0); /* Force hardware acceleration */
+}
+
+.timeline-track {
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+/* Optimize backdrop blur performance */
+.backdrop-blur-sm {
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+/* ====== Compact UI Enhancements ====== */
+/* Smaller, more compact controls */
+.compact-controls {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+/* Professional time display */
+.time-display {
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.025em;
+}
+
+/* ====== Scene Block Smooth Resizing ====== */
+.timeline-scene { 
+  will-change: left, width; 
+  transition: none; 
+}
+
+.handle { 
+  touch-action: none; /* critical for pointer events on touchpads */
+}
+
+.select-none { 
+  user-select: none; 
 }

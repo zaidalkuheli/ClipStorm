@@ -9,14 +9,8 @@ export function PreviewPanel() {
   const showSafeArea = useEditorStore(s => s.showSafeArea);
 
   return (
-    <Panel
-      title="Player"
-      className="h-full"
-    >
-      {/* Because .panel-body is now flex-1 column, this fills perfectly */}
-      <div className="relative flex-1 min-h-[160px]">
-        <AutoFitFrame aspect={aspect} showGrid={showGrid} showSafeArea={showSafeArea} />
-      </div>
-    </Panel>
+    <div className="h-full w-full">
+      <AutoFitFrame aspect={aspect} showGrid={showGrid} showSafeArea={showSafeArea} />
+    </div>
   );
 }
