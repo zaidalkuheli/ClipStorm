@@ -200,7 +200,11 @@ svg * {
 }
 
 .panel-body { 
-  padding: var(--space-xl); 
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;          /* fill remaining panel height */
+  min-height: 0;    /* allow children to size properly */
 }
 
 /* ====== Premium Badge System ====== */
@@ -339,6 +343,19 @@ svg * {
   background: linear-gradient(145deg, var(--surface-active), var(--surface-tertiary));
 }
 
+/* ====== Dark Dropdown Options ====== */
+select option {
+  background: var(--surface-primary);
+  color: var(--text-primary);
+  border: none;
+  padding: var(--space-sm) var(--space-md);
+}
+
+select:focus option {
+  background: var(--surface-secondary);
+  color: var(--text-primary);
+}
+
 /* ====== Premium Resizable Panels ====== */
 .ResizeHandle {
   background: transparent; 
@@ -444,20 +461,133 @@ svg * {
   min-height: 32px;
 }
 
-/* ====== Premium Timeline Ruler + Playhead ====== */
+/* ====== Professional Timeline System ====== */
+
+/* Timeline Header */
+.timeline-header {
+  background: linear-gradient(180deg, var(--surface-primary), var(--surface-secondary));
+  border-bottom: 1px solid var(--border-primary);
+}
+
+/* Track Container */
+.track-container {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  margin-bottom: 8px;
+}
+
+.track-label {
+  width: 80px;
+  flex-shrink: 0;
+  padding-right: 12px;
+  display: flex;
+  align-items: center;
+}
+
+.track-content {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  position: relative;
+}
+
+/* Timeline Clips */
+.timeline-clip {
+  height: 32px;
+  min-width: 60px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.timeline-clip:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.timeline-clip:active {
+  transform: translateY(0);
+}
+
+.clip-content {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+}
+
+/* Professional Ruler */
 .ruler { 
-  height: 32px; 
+  height: 40px; 
   border-top: 1px solid var(--border-primary); 
   background: linear-gradient(180deg, var(--surface-secondary), var(--surface-tertiary));
   display: flex; 
   align-items: center; 
-  gap: var(--space-xl); 
   padding: 0 var(--space-lg); 
   font-size: var(--font-size-xs); 
   font-weight: 500;
   color: var(--text-tertiary);
   backdrop-filter: blur(8px);
+  position: relative;
 }
+
+.ruler-markers {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.ruler-marker {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  padding-bottom: 4px;
+}
+
+.ruler-marker.major {
+  width: 1px;
+  background: var(--text-secondary);
+}
+
+.ruler-marker.minor {
+  width: 1px;
+  background: var(--border-primary);
+  height: 60%;
+  top: 20%;
+}
+
+.ruler-marker.major:nth-child(1) { left: 0%; }
+.ruler-marker.minor:nth-child(2) { left: 5%; }
+.ruler-marker.minor:nth-child(3) { left: 10%; }
+.ruler-marker.minor:nth-child(4) { left: 15%; }
+.ruler-marker.major:nth-child(5) { left: 20%; }
+.ruler-marker.minor:nth-child(6) { left: 25%; }
+.ruler-marker.minor:nth-child(7) { left: 30%; }
+.ruler-marker.minor:nth-child(8) { left: 35%; }
+.ruler-marker.minor:nth-child(9) { left: 40%; }
+.ruler-marker.major:nth-child(10) { left: 45%; }
+.ruler-marker.minor:nth-child(11) { left: 50%; }
+.ruler-marker.minor:nth-child(12) { left: 55%; }
+.ruler-marker.minor:nth-child(13) { left: 60%; }
+.ruler-marker.minor:nth-child(14) { left: 65%; }
+.ruler-marker.major:nth-child(15) { left: 70%; }
+.ruler-marker.minor:nth-child(16) { left: 75%; }
+.ruler-marker.minor:nth-child(17) { left: 80%; }
+.ruler-marker.minor:nth-child(18) { left: 85%; }
+.ruler-marker.minor:nth-child(19) { left: 90%; }
+.ruler-marker.major:nth-child(20) { left: 95%; }
 
 .playhead { 
   position: absolute; 
@@ -516,4 +646,39 @@ svg * {
 
 ::-webkit-scrollbar-thumb:hover {
   background: linear-gradient(180deg, var(--accent-primary), var(--brand-primary));
+}
+
+/* ====== Panel Constraints - Prevent Overlap ====== */
+.panel {
+  min-height: 200px; /* Ensure panels never collapse too small */
+}
+
+/* Timeline specific constraints */
+.timeline-panel {
+  min-height: 120px; /* Minimum timeline height to prevent overlap */
+}
+
+/* Ensure timeline never overlaps player */
+[data-panel-id="timeline"] {
+  min-height: 120px !important;
+}
+
+/* Prevent player from being too small */
+[data-panel-id="preview"] {
+  min-height: 300px !important;
+}
+
+/* ====== Timeline-Aware Player Enhancements ====== */
+/* Ensure the player area gets mouse events even over transparent overlay gaps */
+.preview-surface { 
+  position: relative; 
+}
+
+.preview-surface * { 
+  user-select: none; 
+}
+
+/* Subtle hover ring on player for premium feel */
+.preview-surface:hover { 
+  box-shadow: 0 0 0 1px var(--ring) inset; 
 }
