@@ -6,6 +6,7 @@ import { PreviewPanel } from "@/components/panels/PreviewPanel";
 import { InspectorPanel } from "@/components/panels/InspectorPanel";
 import { Timeline } from "@/components/timeline/Timeline";
 import { ClientOnly } from "@/components/ui/ClientOnly";
+import { useProjectStore } from "@/stores/projectStore";
 
 /**
  * ResizableShell - Main layout component with persistent panel sizing
@@ -33,6 +34,23 @@ function ResizableShellContent() {
   // Use consistent initial values to prevent hydration mismatch
   const [hLayout, setHLayout] = React.useState<number[]>([15, 70, 15]);
   const [vLayout, setVLayout] = React.useState<number[]>([80, 20]);
+  
+  // Project store for dirty state protection
+  const dirty = useProjectStore(s => s.dirty);
+
+  // Dirty state protection - warn on unload
+  React.useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (dirty) {
+        e.preventDefault();
+        e.returnValue = ""; // Required for Chrome
+        return ""; // Required for Safari
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [dirty]);
 
   // Load from localStorage after hydration
   React.useEffect(() => {

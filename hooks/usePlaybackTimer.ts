@@ -11,7 +11,7 @@ export function usePlaybackTimer() {
   const pause = useEditorStore(s => s.pause);
   
   const lastTimeRef = useRef<number>(0);
-  const animationFrameRef = useRef<number>();
+  const animationFrameRef = useRef<number | undefined>(undefined);
   const isActiveRef = useRef<boolean>(false);
 
   const updatePlayhead = useCallback((currentTime: number) => {

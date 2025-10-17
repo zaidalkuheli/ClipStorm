@@ -27,10 +27,30 @@ export function SceneBlocks() {
   const selectScene = useEditorStore(s => s.selectScene);
   const moveScene = useEditorStore(s => s.moveScene);
   const snapAnimationId = useEditorStore(s => s.snapAnimationId);
+  
+  // Transaction methods
+  const beginTx = useEditorStore(s => s.beginTx);
+  const commitTx = useEditorStore(s => s.commitTx);
+  const cancelTx = useEditorStore(s => s.cancelTx);
 
   const containerRef = React.useRef<HTMLDivElement>(null);
 
   const msToPx = (ms: number) => (ms / 1000) * pxPerSec;
+
+  // Escape key handling for canceling transactions
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        cancelTx();
+        // Reset any ongoing drag states
+        dragRef.current = null;
+        moveDragRef.current = null;
+        document.body.style.cursor = "";
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [cancelTx]);
 
   // dynamic grid based on zoom: target ~8px between snap points
   const gridMsFromZoom = React.useCallback(() => {
@@ -64,6 +84,10 @@ export function SceneBlocks() {
     e.preventDefault();
     e.stopPropagation(); // Prevent scene move when resizing
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    
+    // Begin transaction for resize
+    beginTx(`Resize ${edge} edge`);
+    
     dragRef.current = { id, edge };
     document.body.style.cursor = "ew-resize";
     console.log('🎬 Starting smooth drag:', { id, edge, sceneIndex: scenes.findIndex(s => s.id === id) });
@@ -122,6 +146,9 @@ export function SceneBlocks() {
       const finalTargetMs = Math.max(0, Math.min(durationMs, (contentX / pxPerSec) * 1000));
       console.log('🎬 Final snap:', { finalTargetMs, gridMs: gridMsFromZoom() });
       resizeSceneTo(d.id, d.edge, finalTargetMs, MIN_MS, gridMsFromZoom(), pxPerSec);
+      
+      // Commit transaction
+      commitTx();
     }
     
     // Handle move end
@@ -136,6 +163,9 @@ export function SceneBlocks() {
       
       console.log('🎬 Final move:', { finalStartMs, gridMs: gridMsFromZoom() });
       moveScene(m.id, finalStartMs, pxPerSec);
+      
+      // Commit transaction
+      commitTx();
     }
   };
 
@@ -151,6 +181,9 @@ export function SceneBlocks() {
     
     const scene = scenes.find(s => s.id === sceneId);
     if (!scene) return;
+    
+    // Begin transaction for move
+    beginTx(`Move scene`);
     
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     moveDragRef.current = {

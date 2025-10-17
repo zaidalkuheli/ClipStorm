@@ -1,6 +1,7 @@
 "use client";
 import { create } from "zustand";
 import { nanoid } from "nanoid";
+import { History, HistorySnapshot, makeSnapshot, cloneSnapshot, applySnapshot } from "./history";
 
 // Tuned to feel noticeable but not sticky
 export const SNAP_PX = 8;      // ~8px snaps & links
@@ -54,7 +55,7 @@ function unlinkLeft(cur: Scene, prev?: Scene) {
 
 export type Scene = { 
   id: string; 
-  label: string; 
+  label?: string; 
   startMs: number; 
   endMs: number;
   // NEW: explicit neighbor links (only to immediate neighbors)
@@ -83,22 +84,45 @@ interface EditorState {
   scenes: Scene[];
   selectedSceneId: string | null;
   snapAnimationId: string | null; // Track which scene just snapped for animation
+  
+  // history
+  history: History;
 
-      // actions
+  // actions
   setAspect: (aspect: AspectRatio) => void;
   setResolution: (resolution: Resolution) => void;
   setFps: (fps: FrameRate) => void;
   toggleSafeArea: () => void;
   toggleGrid: () => void;
 
-      setScenes: (scenes: Scene[]) => void;
-      addScene: (scene: Omit<Scene, 'id'>) => void;
-      removeScene: (id: string) => void;
-      moveScene: (id: string, newStartMs: number, pxPerSec: number) => void;
-      resizeScene: (id: string, edge: "left" | "right", deltaMs: number, minMs: number, gridMs: number) => void;
-      resizeSceneTo: (id: string, edge: "left" | "right", targetMs: number, minMs: number, gridMs: number, pxPerSec: number) => void;
-      selectScene: (id: string | null) => void;
-      triggerSnapAnimation: (id: string) => void;
+  setScenes: (scenes: Scene[]) => void;
+  setDuration: (durationMs: number) => void;
+  addScene: (scene: Omit<Scene, 'id'>) => void;
+  removeScene: (id: string) => void;
+  moveScene: (id: string, newStartMs: number, pxPerSec: number) => void;
+  resizeScene: (id: string, edge: "left" | "right", deltaMs: number, minMs: number, gridMs: number) => void;
+  resizeSceneTo: (id: string, edge: "left" | "right", targetMs: number, minMs: number, gridMs: number, pxPerSec: number) => void;
+  selectScene: (id: string | null) => void;
+  triggerSnapAnimation: (id: string) => void;
+
+  // history actions
+  getSnapshot: () => HistorySnapshot;
+  beginTx: (label?: string) => void;
+  commitTx: () => void;
+  cancelTx: () => void;
+  undo: () => void;
+  redo: () => void;
+  canUndo: () => boolean;
+  canRedo: () => boolean;
+
+  // serialization
+  getSerializableState: () => {
+    scenes: Scene[];
+    durationMs: number;
+    fps: FrameRate;
+    aspect: AspectRatio;
+    resolution: Resolution;
+  };
 
   // timeline actions
   setPlayhead: (ms: number) => void;
@@ -150,6 +174,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   scenes: initialScenes,
   selectedSceneId: null,
   snapAnimationId: null,
+  
+  // history
+  history: { past: [], future: [], inTx: false, max: 100 },
 
       setAspect: (aspect) => set({ aspect }),
   setResolution: (resolution) => set({ resolution }),
@@ -166,6 +193,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
     set({ scenes, durationMs: newDuration });
   },
+
+  setDuration: (durationMs) => set({ durationMs }),
 
   addScene: (sceneData) => {
     const { scenes, durationMs } = get();
@@ -410,4 +439,108 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   pause: () => set({ isPlaying: false }),
   togglePlayback: () => set(state => ({ isPlaying: !state.isPlaying })),
   setPlaybackSpeed: (speed) => set({ playbackSpeed: clamp(speed, 0.1, 4.0) }),
+
+  // history actions
+  getSnapshot: (): HistorySnapshot => {
+    const { scenes, durationMs, playheadMs } = get();
+    // ensure scenes are sorted & normalized
+    const sorted = [...scenes].sort((a,b)=>a.startMs-b.startMs).map(s=>({ ...s }));
+    return makeSnapshot({ scenes: sorted, durationMs, playheadMs });
+  },
+
+  beginTx: () => {
+    const { history } = get();
+    if (history.inTx) return;
+    const base = get().getSnapshot();
+    set({ history: { ...history, inTx: true, txBase: base }});
+  },
+
+  commitTx: () => {
+    const { history } = get();
+    if (!history.inTx || !history.txBase) return;
+    const after = get().getSnapshot();
+
+    // If nothing changed, just end
+    const beforeJson = JSON.stringify(history.txBase);
+    const afterJson  = JSON.stringify(after);
+    if (beforeJson === afterJson) {
+      set({ history: { past: history.past, future: [], inTx: false, txBase: undefined, max: history.max }});
+      return;
+    }
+
+    const newPast = [...history.past, cloneSnapshot(history.txBase)];
+    while (newPast.length > history.max) newPast.shift();
+
+    set({ history: { past: newPast, future: [], inTx: false, txBase: undefined, max: history.max }});
+  },
+
+  cancelTx: () => {
+    const { history } = get();
+    if (!history.inTx || !history.txBase) { 
+      set({ history: { ...history, inTx: false, txBase: undefined }}); 
+      return; 
+    }
+    applySnapshot(
+      { 
+        setScenes: (scenes)=> set({ scenes }),
+        setDuration: (ms)=> set({ durationMs: ms }),
+        setPlayhead: (ms)=> set({ playheadMs: ms }) 
+      },
+      history.txBase
+    );
+    set({ history: { past: history.past, future: history.future, inTx: false, txBase: undefined, max: history.max }});
+  },
+
+  undo: () => {
+    const { history } = get();
+    if (history.inTx) get().commitTx();
+    const prev = history.past[history.past.length - 1];
+    if (!prev) return;
+    const curr = get().getSnapshot();
+    applySnapshot(
+      { 
+        setScenes: (scenes)=> set({ scenes }),
+        setDuration: (ms)=> set({ durationMs: ms }),
+        setPlayhead: (ms)=> set({ playheadMs: ms }) 
+      },
+      prev
+    );
+    const newPast = history.past.slice(0, -1);
+    const newFuture = [curr, ...history.future];
+    set({ history: { past: newPast, future: newFuture, inTx: false, txBase: undefined, max: history.max }});
+  },
+
+  redo: () => {
+    const { history } = get();
+    if (history.inTx) get().commitTx();
+    const next = history.future[0];
+    if (!next) return;
+    const curr = get().getSnapshot();
+    applySnapshot(
+      { 
+        setScenes: (scenes)=> set({ scenes }),
+        setDuration: (ms)=> set({ durationMs: ms }),
+        setPlayhead: (ms)=> set({ playheadMs: ms }) 
+      },
+      next
+    );
+    const newFuture = history.future.slice(1);
+    const newPast = [...history.past, curr];
+    set({ history: { past: newPast, future: newFuture, inTx: false, txBase: undefined, max: history.max }});
+  },
+
+  canUndo: () => get().history.past.length > 0,
+  canRedo: () => get().history.future.length > 0,
+
+  // serialization
+  getSerializableState: () => {
+    const { scenes, durationMs, fps, aspect, resolution } = get();
+    return {
+      scenes: [...scenes].sort((a, b) => a.startMs - b.startMs),
+      durationMs,
+      fps,
+      aspect,
+      resolution,
+    };
+  },
 }));

@@ -2,7 +2,7 @@
 import React from "react";
 import { useEditorStore } from "@/stores/editorStore";
 
-export function Playhead({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement> }) {
+export function Playhead({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement | null> }) {
   const playheadMs = useEditorStore(s => s.playheadMs);
   const pxPerSec = useEditorStore(s => s.pxPerSec);
   const setPlayhead = useEditorStore(s => s.setPlayhead);

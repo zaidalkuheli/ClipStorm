@@ -17,10 +17,6 @@
         "./*"
       ]
     },
-    "types": [
-      "react/next",
-      "react-dom/next"
-    ],
     "allowJs": true,
     "skipLibCheck": true,
     "noEmit": true,
