@@ -11,6 +11,13 @@ const AssetSchema = z.object({
   uri: z.string().optional(),
 });
 
+// Transform schema
+const TransformSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  scale: z.number(),
+});
+
 // Scene schema (matches editor store Scene type)
 const SceneSchema = z.object({
   id: z.string(),
@@ -19,6 +26,8 @@ const SceneSchema = z.object({
   endMs: z.number(),
   linkLeftId: z.string().nullable().optional(),
   linkRightId: z.string().nullable().optional(),
+  assetId: z.string().nullable().optional(), // NEW optional
+  transform: TransformSchema.nullable().optional(), // NEW transform data
 });
 
 // Project metadata
@@ -81,14 +90,7 @@ export function makeEmptyProject(name?: string): Project {
     },
     assets: [],
     timeline: {
-      scenes: [
-        {
-          id: `scene_${now}_1`,
-          label: "Scene 1",
-          startMs: 0,
-          endMs: 5000,
-        },
-      ],
+      scenes: [], // Start with empty timeline for clean UI
     },
   };
 }
@@ -98,6 +100,46 @@ export function migrateToLatest(data: unknown): Project {
   try {
     return ProjectV1.parse(data);
   } catch (error) {
+    if (error instanceof Error && error.message.includes('assets')) {
+      // Check if assets field exists and what type it is
+      const dataObj = data as any;
+      if (dataObj && typeof dataObj === 'object') {
+        if (dataObj.assets !== undefined) {
+          if (Array.isArray(dataObj.assets)) {
+            throw new Error(`Invalid project data: assets array has invalid items. ${error.message}`);
+          } else {
+            // Try to fix common issues with assets field
+            console.warn("🔧 Attempting to fix malformed assets field:", typeof dataObj.assets);
+            
+            // If assets is an object, try to convert it to an array
+            if (typeof dataObj.assets === 'object' && dataObj.assets !== null) {
+              const assetsArray = Object.values(dataObj.assets);
+              if (Array.isArray(assetsArray)) {
+                dataObj.assets = assetsArray;
+                console.log("🔧 Fixed assets field: converted object to array");
+                // Try parsing again with fixed data
+                try {
+                  return ProjectV1.parse(dataObj);
+                } catch (retryError) {
+                  throw new Error(`Invalid project data: assets field was an object, tried to convert to array but still invalid. ${retryError instanceof Error ? retryError.message : 'Unknown error'}`);
+                }
+              }
+            }
+            
+            throw new Error(`Invalid project data: assets field is not an array (received ${typeof dataObj.assets}). Expected an array of asset objects.`);
+          }
+        } else {
+          // If assets field is missing, add an empty array
+          console.warn("🔧 Adding missing assets field");
+          dataObj.assets = [];
+          try {
+            return ProjectV1.parse(dataObj);
+          } catch (retryError) {
+            throw new Error(`Invalid project data: missing assets field, tried to add empty array but still invalid. ${retryError instanceof Error ? retryError.message : 'Unknown error'}`);
+          }
+        }
+      }
+    }
     throw new Error(`Invalid project data: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }
@@ -127,7 +169,8 @@ export function editorToProject(
     aspect: "9:16" | "1:1" | "16:9";
     resolution: string;
   },
-  existingProject?: Project
+  existingProject?: Project,
+  assets?: any[] // Add assets parameter
 ): Project {
   const now = Date.now();
   
@@ -144,6 +187,7 @@ export function editorToProject(
         resolution: editorState.resolution,
         durationMs: editorState.durationMs,
       },
+      assets: assets || existingProject.assets, // Include assets
       timeline: {
         scenes: editorState.scenes,
       },
@@ -165,7 +209,7 @@ export function editorToProject(
       resolution: editorState.resolution,
       durationMs: editorState.durationMs,
     },
-    assets: [],
+    assets: assets || [], // Include assets
     timeline: {
       scenes: editorState.scenes,
     },

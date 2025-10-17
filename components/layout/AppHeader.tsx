@@ -1,10 +1,11 @@
 "use client";
-import { Button } from "@/components/ui/Button";
-import { Sparkles, Download, Plus, RotateCcw, RotateCw, FolderOpen, Save, FileText } from "lucide-react";
-import { ClientOnly } from "@/components/ui/ClientOnly";
-import { ExportModal } from "@/components/modals/ExportModal";
+
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { Sparkles, Download, Plus, RotateCcw, RotateCw, FolderOpen, Save, FileText } from "lucide-react";
+import { Button } from "@/components/ui/Button";
+import { ClientOnly } from "@/components/ui/ClientOnly";
+import { ExportModal } from "@/components/modals/ExportModal";
 import { useEditorStore } from "@/stores/editorStore";
 import { useProjectStore } from "@/stores/projectStore";
 
@@ -76,7 +77,7 @@ export function AppHeader() {
       // Check if File System Access API is supported
       if (!('showSaveFilePicker' in window)) {
         // Fallback to download
-        exportJSON();
+        await exportJSON();
         setIsProjectMenuOpen(false);
         return;
       }
@@ -93,7 +94,10 @@ export function AppHeader() {
       // Get current project state
       const editorState = useEditorStore.getState().getSerializableState();
       const { editorToProject } = await import("@/lib/projectSchema");
-      const updatedProject = editorToProject(editorState, project);
+      const { useAssetsStore } = await import("@/stores/assetsStore");
+      const assets = await useAssetsStore.getState().getAssetsForProject();
+      console.log("🔍 AppHeader - Assets for SaveAs:", assets);
+      const updatedProject = editorToProject(editorState, project, assets);
       
       // Write to file
       const writable = await handle.createWritable();

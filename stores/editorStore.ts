@@ -61,6 +61,22 @@ export type Scene = {
   // NEW: explicit neighbor links (only to immediate neighbors)
   linkLeftId?: string | null;
   linkRightId?: string | null;
+  assetId?: string | null; // NEW optional asset binding
+  // Transform data for media editing
+  transform?: {
+    x: number;
+    y: number;
+    scale: number;
+  } | null;
+};
+
+export type AudioClip = {
+  id: string;
+  startMs: number;
+  endMs: number;
+  assetId: string;
+  kind: "vo" | "music";
+  gain?: number;
 };
 export type AspectRatio = "9:16" | "1:1" | "16:9";
 export type Resolution = "1080x1920" | "720x1280";
@@ -85,6 +101,9 @@ interface EditorState {
   selectedSceneId: string | null;
   snapAnimationId: string | null; // Track which scene just snapped for animation
   
+  // audio
+  audioClips: AudioClip[];
+  
   // history
   history: History;
 
@@ -104,6 +123,16 @@ interface EditorState {
   resizeSceneTo: (id: string, edge: "left" | "right", targetMs: number, minMs: number, gridMs: number, pxPerSec: number) => void;
   selectScene: (id: string | null) => void;
   triggerSnapAnimation: (id: string) => void;
+  updateSceneTransform: (id: string, transform: { x: number; y: number; scale: number }) => void;
+
+  // helpers
+  msPerPx: () => number;
+  pxToMs: (px: number) => number;
+  msToPx: (ms: number) => number;
+  computeInsertMs: () => number;
+  normalizeDuration: () => void;
+  addSceneFromAsset: (assetId: string, opts?: { atMs?: number; durationMs?: number; label?: string }) => string;
+  addAudioFromAsset: (assetId: string, kind: "vo"|"music", opts?: { atMs?: number; durationMs?: number }) => string;
 
   // history actions
   getSnapshot: () => HistorySnapshot;
@@ -175,6 +204,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   selectedSceneId: null,
   snapAnimationId: null,
   
+  // audio
+  audioClips: [],
+  
   // history
   history: { past: [], future: [], inTx: false, max: 100 },
 
@@ -223,7 +255,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     const scene = scenes[sceneIndex];
     const sceneDuration = scene.endMs - scene.startMs;
-    const newEndMs = Math.min(durationMs, newStartMs + sceneDuration);
+    const newEndMs = newStartMs + sceneDuration;
     const adjustedStartMs = Math.max(0, newEndMs - sceneDuration);
 
     // Create updated scene
@@ -311,7 +343,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           cur.startMs = Math.min(newStart, maxStart);
           if (prev) prev.endMs = cur.startMs;
         } else {
-          const newEnd = Math.min(next ? next.startMs - minMs : get().durationMs, cur.endMs + deltaMs);
+          const newEnd = next ? next.startMs - minMs : cur.endMs + deltaMs;
           const minEnd = cur.startMs + minMs;
           cur.endMs = Math.max(newEnd, minEnd);
           if (next) next.startMs = cur.endMs;
@@ -377,7 +409,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           // RIGHT EDGE
           const low  = cur.startMs + minMs;
           // IMPORTANT: use next.end for upper bound so it doesn't collapse while trimming
-          const high = next ? (next.endMs - minMs) : durationMs;
+          const high = next ? (next.endMs - minMs) : Number.MAX_SAFE_INTEGER;
 
           let newEnd = snapToGrid(targetMs, gridMs);
           newEnd = bounds(newEnd, low, high);
@@ -411,6 +443,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         }
 
         set({ scenes });
+        get().normalizeDuration(); // Extend timeline if needed
       },
 
       selectScene: (id) => set({ selectedSceneId: id }),
@@ -419,6 +452,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         set({ snapAnimationId: id });
         // Clear animation after it completes
         setTimeout(() => set({ snapAnimationId: null }), 400);
+      },
+
+      updateSceneTransform: (id, transform) => {
+        set(state => ({
+          scenes: state.scenes.map(scene => 
+            scene.id === id ? { ...scene, transform } : scene
+          )
+        }));
       },
 
       setPlayhead: (ms) => {
@@ -542,5 +583,48 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       aspect,
       resolution,
     };
+  },
+
+  // helpers
+  msPerPx: () => 1000 / get().pxPerSec,
+  pxToMs: (px) => Math.max(0, Math.round(px * (1000 / get().pxPerSec))),
+  msToPx: (ms) => Math.max(0, Math.round(ms * (get().pxPerSec / 1000))),
+
+  computeInsertMs: () => {
+    const { playheadMs, scenes } = get();
+    const end = scenes.length ? Math.max(...scenes.map(s => s.endMs)) : 0;
+    // Always insert at the end of the last block, not at playhead
+    return end;
+  },
+
+  normalizeDuration: () => {
+    const { scenes } = get();
+    const end = scenes.length ? Math.max(...scenes.map(s => s.endMs)) : 0;
+    set({ durationMs: Math.max(end, 1000) });
+  },
+
+  addSceneFromAsset: (assetId, opts) => {
+    const at = typeof opts?.atMs === "number" ? Math.max(0, opts.atMs) : get().computeInsertMs();
+    const dflt = opts?.durationMs ?? 3000; // images=3s, videos=5s set by caller
+    const id = crypto.randomUUID();
+    const label = opts?.label;
+    const scene = { id, startMs: at, endMs: at + dflt, label, assetId, linkLeftId: null, linkRightId: null };
+    // prevent overlap: shift if needed
+    const scenes = [...get().scenes, scene].sort((a,b)=>a.startMs-b.startMs);
+    set({ scenes });
+    get().normalizeDuration();
+    set(state => ({ history: { ...state.history, future: [] }})); // clear redo on new insert
+    return id;
+  },
+
+  addAudioFromAsset: (assetId, kind, opts) => {
+    const at = typeof opts?.atMs === "number" ? Math.max(0, opts.atMs) : get().computeInsertMs();
+    const dflt = opts?.durationMs ?? 8000; // 8s default
+    const id = crypto.randomUUID();
+    const clip = { id, startMs: at, endMs: at + dflt, assetId, kind };
+    set({ audioClips: [...get().audioClips, clip].sort((a,b)=>a.startMs-b.startMs) });
+    get().normalizeDuration();
+    set(state => ({ history: { ...state.history, future: [] }}));
+    return id;
   },
 }));

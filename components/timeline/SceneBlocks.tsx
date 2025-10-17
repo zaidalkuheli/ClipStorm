@@ -1,10 +1,13 @@
 "use client";
 import React from "react";
 import { useEditorStore, SNAP_PX } from "@/stores/editorStore";
+import { useAssetsStore } from "@/stores/assetsStore";
 import clsx from "clsx";
 
 const MIN_MS = 800;   // shorter min feels snappier
 const LIVE_GRID_MS = 1; // effectively "no snap" while moving
+const AUTO_SCROLL_THRESHOLD = 200; // pixels from edge to trigger auto-scroll (very easy to trigger)
+const AUTO_SCROLL_SPEED = 100; // pixels per frame (ULTRA fast - no hiccups)
 
 // Professional color palette for scene blocks
 const SCENE_COLORS = [
@@ -32,6 +35,9 @@ export function SceneBlocks() {
   const beginTx = useEditorStore(s => s.beginTx);
   const commitTx = useEditorStore(s => s.commitTx);
   const cancelTx = useEditorStore(s => s.cancelTx);
+
+  // Assets store for media thumbnails
+  const getAssetById = useAssetsStore(s => s.getById);
 
   const containerRef = React.useRef<HTMLDivElement>(null);
 
@@ -79,6 +85,71 @@ export function SceneBlocks() {
     startMs: number;
   } | null>(null);
 
+  // Auto-scroll functionality - NO STOPS using setInterval
+  const autoScrollRef = React.useRef<{
+    direction: 'left' | 'right' | null;
+    intervalId: NodeJS.Timeout | null;
+    isScrolling: boolean;
+    scrollContainer: HTMLElement | null;
+  }>({ direction: null, intervalId: null, isScrolling: false, scrollContainer: null });
+
+  const startAutoScroll = (direction: 'left' | 'right') => {
+    if (autoScrollRef.current.direction === direction && autoScrollRef.current.isScrolling) return;
+    
+    stopAutoScroll();
+    autoScrollRef.current.direction = direction;
+    autoScrollRef.current.isScrolling = true;
+    
+    // Cache the scroll container to avoid repeated DOM queries
+    autoScrollRef.current.scrollContainer = containerRef.current?.closest('.timeline-scroll-area') as HTMLElement;
+    
+    if (!autoScrollRef.current.scrollContainer) {
+      autoScrollRef.current.isScrolling = false;
+      return;
+    }
+    
+    // Use setInterval for maximum smoothness - no frame conflicts
+    autoScrollRef.current.intervalId = setInterval(() => {
+      if (!autoScrollRef.current.isScrolling || !autoScrollRef.current.scrollContainer) {
+        stopAutoScroll();
+        return;
+      }
+      
+      const scrollAmount = autoScrollRef.current.direction === 'left' 
+        ? -AUTO_SCROLL_SPEED 
+        : AUTO_SCROLL_SPEED;
+      
+      // Direct scroll - no conditions, no checks
+      autoScrollRef.current.scrollContainer.scrollLeft += scrollAmount;
+    }, 16); // ~60fps
+  };
+
+  const stopAutoScroll = () => {
+    if (autoScrollRef.current.intervalId) {
+      clearInterval(autoScrollRef.current.intervalId);
+      autoScrollRef.current.intervalId = null;
+    }
+    autoScrollRef.current.direction = null;
+    autoScrollRef.current.isScrolling = false;
+    autoScrollRef.current.scrollContainer = null;
+  };
+
+  const checkAutoScroll = (clientX: number) => {
+    if (!containerRef.current) return;
+    
+    const rect = containerRef.current.getBoundingClientRect();
+    const distanceFromLeft = clientX - rect.left;
+    const distanceFromRight = rect.right - clientX;
+    
+    // Start scrolling immediately when near edges - no stopping until drag ends
+    if (distanceFromLeft < AUTO_SCROLL_THRESHOLD) {
+      startAutoScroll('left');
+    } else if (distanceFromRight < AUTO_SCROLL_THRESHOLD) {
+      startAutoScroll('right');
+    }
+    // No else clause - keep scrolling until drag ends
+  };
+
   const onPointerDown = (e: React.PointerEvent, id: string, edge: "left" | "right") => {
     if (!containerRef.current) return;
     e.preventDefault();
@@ -101,9 +172,14 @@ export function SceneBlocks() {
 
     const contentX = getContentX(e);
 
+    // Check for auto-scroll during any drag operation
+    if (d || m) {
+      checkAutoScroll(e.clientX);
+    }
+
     // Handle resize dragging
     if (d) {
-      const targetMs = Math.max(0, Math.min(durationMs, (contentX / pxPerSec) * 1000));
+      const targetMs = Math.max(0, (contentX / pxPerSec) * 1000);
 
       // throttle to one store update per frame
       if (rafRef.current == null) {
@@ -118,7 +194,7 @@ export function SceneBlocks() {
     if (m) {
       const deltaX = contentX - m.startX;
       const deltaMs = (deltaX / pxPerSec) * 1000;
-      const newStartMs = Math.max(0, Math.min(durationMs, m.startMs + deltaMs));
+      const newStartMs = Math.max(0, m.startMs + deltaMs);
 
       // throttle to one store update per frame
       if (rafRef.current == null) {
@@ -136,6 +212,9 @@ export function SceneBlocks() {
     
     if (!containerRef.current) return;
 
+    // Stop auto-scroll on pointer up
+    stopAutoScroll();
+
     // Handle resize end
     if (d) {
       dragRef.current = null;
@@ -143,7 +222,7 @@ export function SceneBlocks() {
 
       // final snap on release using zoom-aware grid
       const contentX = getContentX(e);
-      const finalTargetMs = Math.max(0, Math.min(durationMs, (contentX / pxPerSec) * 1000));
+      const finalTargetMs = Math.max(0, (contentX / pxPerSec) * 1000);
       console.log('🎬 Final snap:', { finalTargetMs, gridMs: gridMsFromZoom() });
       resizeSceneTo(d.id, d.edge, finalTargetMs, MIN_MS, gridMsFromZoom(), pxPerSec);
       
@@ -155,11 +234,12 @@ export function SceneBlocks() {
     if (m) {
       moveDragRef.current = null;
       document.body.style.cursor = "";
+      stopAutoScroll();
       
       const contentX = getContentX(e);
       const deltaX = contentX - m.startX;
       const deltaMs = (deltaX / pxPerSec) * 1000;
-      const finalStartMs = Math.max(0, Math.min(durationMs, m.startMs + deltaMs));
+      const finalStartMs = Math.max(0, m.startMs + deltaMs);
       
       console.log('🎬 Final move:', { finalStartMs, gridMs: gridMsFromZoom() });
       moveScene(m.id, finalStartMs, pxPerSec);
@@ -205,7 +285,16 @@ export function SceneBlocks() {
       onPointerCancel={onPointerUp}
     >
       <div className="relative h-full" style={{ width: Math.max(1, msToPx(durationMs) + 16) }}>
-        {scenes.map((s, index) => {
+        {scenes.length === 0 ? (
+          // Empty state - clean and minimal
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="text-center">
+              <div className="text-xs text-[var(--text-tertiary)] mb-1">No scenes yet</div>
+              <div className="text-xs text-[var(--text-tertiary)]">Drag to create your first scene</div>
+            </div>
+          </div>
+        ) : (
+          scenes.map((s, index) => {
           const left = msToPx(s.startMs);
           const width = msToPx(s.endMs - s.startMs);
           const isFirstBlock = index === 0;
@@ -213,6 +302,10 @@ export function SceneBlocks() {
           const isSelected = selectedSceneId === s.id;
           const colorIndex = index % SCENE_COLORS.length;
           const colors = SCENE_COLORS[colorIndex];
+
+          // Get asset data for media thumbnail
+          const asset = s.assetId ? getAssetById(s.assetId) : null;
+          const hasMedia = asset && (asset.type === 'image' || asset.type === 'video');
 
           // Magnetic linking detection
           const prev = index > 0 ? scenes[index - 1] : null;
@@ -239,16 +332,25 @@ export function SceneBlocks() {
               style={{ 
                 left, 
                 width,
-                backgroundColor: colors.bg,
+                backgroundColor: hasMedia ? 'transparent' : colors.bg,
                 borderColor: isSelected ? "#ffffff" : colors.border,
                 borderWidth: isSelected ? "2px" : "1px",
-                borderStyle: "solid"
+                borderStyle: "solid",
+                backgroundImage: hasMedia ? `url(${asset.url})` : undefined,
+                backgroundSize: 'auto 100%',
+                backgroundPosition: 'left center',
+                backgroundRepeat: 'repeat-x'
               }}
               title={`${s.label} • ${((s.endMs - s.startMs)/1000).toFixed(2)}s`}
               draggable={false}
               onClick={(e) => onSceneClick(e, s.id)}
               onPointerDown={(e) => onScenePointerDown(e, s.id)}
             >
+              {/* Media overlay for better text readability */}
+              {hasMedia && (
+                <div className="absolute inset-0 bg-black/30" />
+              )}
+
               {/* wider, touch-friendly handles with higher z-index */}
               <div
                 className={clsx("absolute left-0 top-0 h-full w-4 cursor-ew-resize bg-white/0 hover:bg-white/10 handle z-20 transition-colors", {
@@ -263,16 +365,24 @@ export function SceneBlocks() {
                 onPointerDown={(e)=>onPointerDown(e, s.id, "right")}
               />
 
-              <div className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-white/90 font-medium select-none drop-shadow-sm">
+              <div className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-white/90 font-medium select-none drop-shadow-sm z-10">
                 {s.label}
               </div>
+
+              {/* Media type indicator */}
+              {hasMedia && (
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-white/80 font-medium select-none drop-shadow-sm z-10">
+                  {asset.type === 'image' ? '📷' : '🎬'}
+                </div>
+              )}
 
               {/* Magnetic linking visual indicators */}
               <span className={clsx("scene-edge left", magnetLeft && "magnet-on", isSnapping && "snap-animation")} />
               <span className={clsx("scene-edge right", magnetRight && "magnet-on", isSnapping && "snap-animation")} />
             </div>
           );
-        })}
+        })
+        )}
       </div>
     </div>
   );

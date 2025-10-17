@@ -5,6 +5,7 @@ import { debounce } from "lodash";
 import { useEffect } from "react";
 import { Project, makeEmptyProject, migrateToLatest, editorToProject } from "@/lib/projectSchema";
 import { useEditorStore, type FrameRate, type Resolution } from "@/stores/editorStore";
+import { useAssetsStore } from "@/stores/assetsStore";
 
 interface ProjectState {
   project: Project | null;
@@ -15,11 +16,11 @@ interface ProjectState {
   // Actions
   newProject: (name?: string) => void;
   loadProject: (project: Project) => void;
-  markDirty: () => void;
+  markDirty: () => Promise<void>;
   save: () => Promise<void>;
   saveAs: () => void;
   open: (file: File) => Promise<void>;
-  exportJSON: () => void;
+  exportJSON: () => Promise<void>;
   clearDirty: () => void;
   loadRecentFile: (filePath: string) => Promise<void>;
 }
@@ -54,6 +55,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     editorStore.setResolution(project.settings.resolution as Resolution);
     editorStore.setPlayhead(0);
     
+    // Clear assets store for new project
+    console.log("🔍 ProjectStore - Clearing assets for new project");
+    useAssetsStore.getState().clearAssets();
+    
     set({ 
       project, 
       dirty: false,
@@ -64,6 +69,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   loadProject: (project: Project) => {
+    console.log("🔍 ProjectStore - Loading project:", project.meta.name);
+    console.log("🔍 ProjectStore - Project assets:", project.assets);
+    console.log("🔍 ProjectStore - Project assets length:", project.assets?.length || 0);
+    
     const editorStore = useEditorStore.getState();
     
     // Update editor state with project data
@@ -74,6 +83,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     editorStore.setResolution(project.settings.resolution as Resolution);
     editorStore.setPlayhead(0);
     
+    // Load assets into assets store
+    if (project.assets && project.assets.length > 0) {
+      console.log("🔍 ProjectStore - Loading assets into assets store:", project.assets.length);
+      useAssetsStore.getState().loadAssetsFromProject(project.assets);
+    } else {
+      console.log("🔍 ProjectStore - No assets to load, clearing assets store");
+      useAssetsStore.getState().clearAssets();
+    }
+    
     set({ 
       project, 
       dirty: false 
@@ -82,7 +100,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     console.log("📂 Loaded project:", project.meta.name);
   },
 
-  markDirty: () => {
+  markDirty: async () => {
     const state = get();
     if (!state.dirty) {
       set({ dirty: true });
@@ -91,7 +109,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (state.project) {
         const editorStore = useEditorStore.getState();
         const editorState = editorStore.getSerializableState();
-        const updatedProject = editorToProject(editorState, state.project);
+        const assets = await useAssetsStore.getState().getAssetsForProject();
+        const updatedProject = editorToProject(editorState, state.project, assets);
         
         debouncedAutosave(updatedProject, DEFAULT_AUTOSAVE_KEY);
       }
@@ -105,7 +124,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       const editorStore = useEditorStore.getState();
       const editorState = editorStore.getSerializableState();
-      const updatedProject = editorToProject(editorState, state.project);
+      const assets = await useAssetsStore.getState().getAssetsForProject();
+      console.log("🔍 ProjectStore - Assets for saving:", assets);
+      console.log("🔍 ProjectStore - Assets length:", assets.length);
+      const updatedProject = editorToProject(editorState, state.project, assets);
+      console.log("🔍 ProjectStore - Updated project assets:", updatedProject.assets);
       
         await setToIndexedDB(state.autosaveKey, updatedProject);
       set({ 
@@ -128,7 +151,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       console.log("🔍 saveAs called with key:", key);
       const editorStore = useEditorStore.getState();
       const editorState = editorStore.getSerializableState();
-      const updatedProject = editorToProject(editorState, state.project);
+      const assets = await useAssetsStore.getState().getAssetsForProject();
+      console.log("🔍 ProjectStore - Assets for saving:", assets);
+      console.log("🔍 ProjectStore - Assets length:", assets.length);
+      const updatedProject = editorToProject(editorState, state.project, assets);
+      console.log("🔍 ProjectStore - Updated project assets:", updatedProject.assets);
       
       console.log("🔍 Saving project to IndexedDB with key:", key);
       await setToIndexedDB(key, updatedProject);
@@ -210,12 +237,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
-  exportJSON: () => {
+  exportJSON: async () => {
     const state = get();
     if (!state.project) return;
     
     try {
-      const dataStr = JSON.stringify(state.project, null, 2);
+      // Get current editor state and assets
+      const editorStore = useEditorStore.getState();
+      const editorState = editorStore.getSerializableState();
+      const assets = await useAssetsStore.getState().getAssetsForProject();
+      console.log("🔍 ProjectStore - Assets for export:", assets);
+      const updatedProject = editorToProject(editorState, state.project, assets);
+      
+      const dataStr = JSON.stringify(updatedProject, null, 2);
       const dataBlob = new Blob([dataStr], { type: "application/json" });
       const url = URL.createObjectURL(dataBlob);
       
