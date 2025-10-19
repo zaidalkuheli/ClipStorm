@@ -2,8 +2,10 @@
 import React from "react";
 import { useEditorStore } from "@/stores/editorStore";
 
-function formatS(seconds: number) {
-  return `${seconds}s`;
+function formatTime(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${minutes}:${secs.toString().padStart(2, '0')}`;
 }
 
 export function Ruler({ contentWidth }: { contentWidth: number }) {
@@ -46,13 +48,13 @@ export function Ruler({ contentWidth }: { contentWidth: number }) {
           <div key={`M-${s}`} className="absolute bottom-0" style={{ left: x }}>
             <div className="w-px bg-white/20" style={{ height: 16 }} />
             <div 
-              className="absolute -translate-x-1/2 -top-1 text-[11px] text-[var(--muted)] select-none whitespace-nowrap"
+              className="absolute -translate-x-1/2 -top-1 text-[9px] text-[var(--muted)] select-none whitespace-nowrap font-mono"
               style={{ 
                 left: s === 0 ? '4px' : '50%', // Special positioning for 0s to avoid cutoff
                 transform: s === 0 ? 'none' : 'translateX(-50%)'
               }}
             >
-              {formatS(s)}
+              {formatTime(s)}
             </div>
           </div>
         );

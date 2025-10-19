@@ -4,12 +4,13 @@ import { createPortal } from "react-dom";
 import { useEditorStore, SNAP_PX } from "@/stores/editorStore";
 import { useAssetsStore } from "@/stores/assetsStore";
 import { BlockContextMenu } from "./BlockContextMenu";
+import { WaveformCanvas } from "./WaveformCanvas";
 import clsx from "clsx";
 
 const MIN_MS = 800;   // shorter min feels snappier
 const LIVE_GRID_MS = 1; // effectively "no snap" while moving
-const AUTO_SCROLL_THRESHOLD = 200; // pixels from edge to trigger auto-scroll (very easy to trigger)
-const AUTO_SCROLL_SPEED = 100; // pixels per frame (ULTRA fast - no hiccups)
+const AUTO_SCROLL_THRESHOLD = 100; // pixels from edge to trigger auto-scroll
+const AUTO_SCROLL_SPEED = 120; // pixels per frame - simple and reliable
 
 // Professional color palette for audio blocks
 const AUDIO_COLORS = [
@@ -107,7 +108,7 @@ export function AudioBlocks() {
     startMs: number;
   } | null>(null);
 
-  // Auto-scroll functionality - NO STOPS using setInterval
+  // Simple and reliable auto-scroll
   const autoScrollRef = React.useRef<{
     direction: 'left' | 'right' | null;
     intervalId: NodeJS.Timeout | null;
@@ -130,7 +131,7 @@ export function AudioBlocks() {
       return;
     }
     
-    // Use setInterval for maximum smoothness - no frame conflicts
+    // Simple and reliable auto-scroll using setInterval
     autoScrollRef.current.intervalId = setInterval(() => {
       if (!autoScrollRef.current.isScrolling || !autoScrollRef.current.scrollContainer) {
         stopAutoScroll();
@@ -168,17 +169,33 @@ export function AudioBlocks() {
   const checkAutoScroll = (clientX: number) => {
     if (!containerRef.current) return;
     
-    const rect = containerRef.current.getBoundingClientRect();
+    // Get the timeline scroll area, not just the container
+    const scrollContainer = containerRef.current?.closest('.timeline-scroll-area') as HTMLElement;
+    if (!scrollContainer) return;
+    
+    const rect = scrollContainer.getBoundingClientRect();
     const distanceFromLeft = clientX - rect.left;
     const distanceFromRight = rect.right - clientX;
     
-    // Start scrolling immediately when near edges - no stopping until drag ends
+    console.log('🎵 AUTO-SCROLL CHECK:', {
+      clientX,
+      scrollLeft: scrollContainer.scrollLeft,
+      scrollWidth: scrollContainer.scrollWidth,
+      clientWidth: scrollContainer.clientWidth,
+      distanceFromLeft,
+      distanceFromRight,
+      threshold: AUTO_SCROLL_THRESHOLD
+    });
+    
+    // Simple and reliable auto-scroll
     if (distanceFromLeft < AUTO_SCROLL_THRESHOLD) {
+      console.log('🎵 Starting LEFT auto-scroll');
       startAutoScroll('left');
     } else if (distanceFromRight < AUTO_SCROLL_THRESHOLD) {
+      console.log('🎵 Starting RIGHT auto-scroll');
       startAutoScroll('right');
     }
-    // No else clause - keep scrolling until drag ends
+    // Keep scrolling until drag ends
   };
 
   const onPointerDown = (e: React.PointerEvent, id: string, edge: "left" | "right") => {
@@ -203,7 +220,7 @@ export function AudioBlocks() {
 
     const contentX = getContentX(e);
 
-    // Check for auto-scroll during any drag operation
+    // Check for auto-scroll during any drag operation - professional smooth audio trimming
     if (d || m) {
       checkAutoScroll(e.clientX);
     }
@@ -352,7 +369,7 @@ export function AudioBlocks() {
             <div
               key={a.id}
               className={clsx(
-                "timeline-audio absolute top-1 bottom-1 rounded-md overflow-hidden cursor-pointer transition-all duration-200",
+                "timeline-audio absolute top-1 bottom-1 rounded-md overflow-hidden cursor-pointer transition-all duration-200 group",
                 {
                   "ring-2 ring-white/60 shadow-lg": isSelected,
                   "hover:shadow-md": !isSelected,
@@ -383,6 +400,9 @@ export function AudioBlocks() {
               {/* Audio overlay for better text readability */}
               <div className="absolute inset-0 bg-black/20" />
 
+              {/* Waveform Canvas */}
+              <WaveformCanvas clip={a} pxPerSec={pxPerSec} height={40} />
+
               {/* wider, touch-friendly handles with higher z-index */}
               <div
                 className={clsx("absolute left-0 top-0 h-full w-4 cursor-ew-resize bg-white/0 hover:bg-white/10 handle z-20 transition-colors", {
@@ -397,14 +417,11 @@ export function AudioBlocks() {
                 onPointerDown={(e)=>onPointerDown(e, a.id, "right")}
               />
 
-              <div className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-white/90 font-medium select-none drop-shadow-sm z-10">
-                {asset?.name || a.kind}
+              {/* Filename - only visible on hover */}
+              <div className="absolute left-1 top-1 px-1.5 py-0.5 bg-black/80 rounded text-[9px] text-white font-medium select-none drop-shadow-sm z-10 max-w-[70%] truncate border border-white/30 opacity-0 group-hover:opacity-100 transition-opacity duration-200" title={asset?.name || a.kind}>
+                {asset?.name ? asset.name.length > 25 ? asset.name.substring(0, 22) + '...' : asset.name : a.kind}
               </div>
 
-              {/* Audio type indicator */}
-              <div className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-white/80 font-medium select-none drop-shadow-sm z-10">
-                🎵
-              </div>
 
               {/* Magnetic linking visual indicators */}
               <span className={clsx("audio-edge left", magnetLeft && "magnet-on", isSnapping && "snap-animation")} />

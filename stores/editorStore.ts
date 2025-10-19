@@ -79,6 +79,7 @@ export type AudioClip = {
   kind: "vo" | "music";
   gain?: number;
   originalDurationMs: number; // Store the original audio file duration
+  audioOffsetMs?: number; // Offset within the original audio file (for cut clips)
 };
 export type AspectRatio = "9:16" | "1:1" | "16:9";
 export type Resolution = "1080x1920" | "720x1280";
@@ -117,6 +118,7 @@ interface EditorState {
   toggleGrid: () => void;
 
   setScenes: (scenes: Scene[]) => void;
+  setAudioClips: (audioClips: AudioClip[]) => void;
   setDuration: (durationMs: number) => void;
   addScene: (scene: Omit<Scene, 'id'>) => void;
   removeScene: (id: string) => void;
@@ -787,17 +789,52 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (audio && snappedMs > audio.startMs && snappedMs < audio.endMs) {
         get().beginTx("Split audio at playhead");
         
+        // Calculate the audio offset for each segment
+        const originalAudioOffset = audio.audioOffsetMs || 0;
+        const timelineOffset = snappedMs - audio.startMs;
+        
         const audioA = {
           ...audio,
           id: nanoid(),
-          endMs: snappedMs
+          endMs: snappedMs,
+          audioOffsetMs: originalAudioOffset // First segment starts at original offset
         };
         
         const audioB = {
           ...audio,
           id: nanoid(),
-          startMs: snappedMs
+          startMs: snappedMs,
+          audioOffsetMs: originalAudioOffset + timelineOffset // Second segment continues from cut point
         };
+        
+        console.log('🎵 AUDIO SPLIT DEBUG:', {
+          originalClip: { 
+            id: audio.id,
+            startMs: audio.startMs, 
+            endMs: audio.endMs, 
+            durationMs: audio.endMs - audio.startMs,
+            audioOffsetMs: audio.audioOffsetMs,
+            assetId: audio.assetId
+          },
+          splitAt: snappedMs,
+          timelineOffset,
+          audioA: { 
+            id: audioA.id,
+            startMs: audioA.startMs, 
+            endMs: audioA.endMs, 
+            durationMs: audioA.endMs - audioA.startMs,
+            audioOffsetMs: audioA.audioOffsetMs,
+            assetId: audioA.assetId
+          },
+          audioB: { 
+            id: audioB.id,
+            startMs: audioB.startMs, 
+            endMs: audioB.endMs, 
+            durationMs: audioB.endMs - audioB.startMs,
+            audioOffsetMs: audioB.audioOffsetMs,
+            assetId: audioB.assetId
+          }
+        });
         
         const newAudioClips = audioClips.filter(a => a.id !== selectedAudioId);
         newAudioClips.push(audioA, audioB);
@@ -1046,13 +1083,32 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   resizeAudioTo: (id: string, edge: "left" | "right", targetMs: number, minMs: number, gridMs: number, pxPerSec: number) => {
+    console.log('🎵 RESIZE AUDIO TO CALLED:', {
+      id,
+      edge,
+      targetMs,
+      minMs,
+      gridMs,
+      pxPerSec
+    });
+    
     const { audioClips: a, durationMs, triggerSnapAnimation } = get();
     const audioClips = [...a]; // Don't sort here, assume already sorted
 
     const i = audioClips.findIndex(ac => ac.id === id);
-    if (i < 0) return;
+    if (i < 0) {
+      console.log('🎵 RESIZE AUDIO TO: Clip not found:', id);
+      return;
+    }
 
     const cur = audioClips[i];
+    console.log('🎵 RESIZE AUDIO TO: Found clip:', {
+      id: cur.id,
+      startMs: cur.startMs,
+      endMs: cur.endMs,
+      audioOffsetMs: cur.audioOffsetMs,
+      originalDurationMs: cur.originalDurationMs
+    });
     const prev = audioClips[i-1];
     const next = audioClips[i+1];
 
@@ -1072,7 +1128,25 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       let newStart = snapToGrid(targetMs, gridMs);
       newStart = bounds(newStart, Math.max(low, maxStartMs), high);
 
+      // Calculate the change in timeline position
+      const timelineOffsetChange = newStart - cur.startMs;
+      
+      // Update audioOffsetMs to reflect the trim
+      const currentAudioOffset = cur.audioOffsetMs || 0;
+      const newAudioOffset = currentAudioOffset + timelineOffsetChange;
+      
+      console.log('🎵 LEFT EDGE TRIM DEBUG:', {
+        clipId: cur.id,
+        oldStartMs: cur.startMs,
+        newStartMs: newStart,
+        timelineOffsetChange: timelineOffsetChange,
+        oldAudioOffsetMs: currentAudioOffset,
+        newAudioOffsetMs: newAudioOffset,
+        clipDurationMs: cur.endMs - cur.startMs
+      });
+
       cur.startMs = newStart;
+      cur.audioOffsetMs = newAudioOffset;
 
       // magnet: if close enough to prev.end => snap + link
       if (prev) {
@@ -1080,6 +1154,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         if (gap >= 0 && gap <= snapMs) {
           // snap & link
           cur.startMs = prev.endMs;
+          // Recalculate audioOffsetMs after magnetic snap
+          const snapOffsetChange = cur.startMs - newStart;
+          cur.audioOffsetMs = newAudioOffset + snapOffsetChange;
+          
           if (triggerSnapAnimation) {
             triggerSnapAnimation(cur.id);
             triggerSnapAnimation(prev.id);
@@ -1096,7 +1174,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       let newEnd = snapToGrid(targetMs, gridMs);
       newEnd = bounds(newEnd, low, Math.min(high, maxEndMs));
 
+      console.log('🎵 RIGHT EDGE TRIM DEBUG:', {
+        clipId: cur.id,
+        oldEndMs: cur.endMs,
+        newEndMs: newEnd,
+        oldAudioOffsetMs: cur.audioOffsetMs || 0,
+        clipDurationMs: cur.endMs - cur.startMs,
+        newDurationMs: newEnd - cur.startMs,
+        note: 'audioOffsetMs stays the same for right edge trim'
+      });
+
       cur.endMs = newEnd;
+      // Note: audioOffsetMs stays the same for right edge trimming
+      // Only the visible duration changes, not the starting point in the audio file
 
       // magnet: close to next.start => snap + link
       if (next) {
@@ -1111,7 +1201,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
     }
 
+    console.log('🎵 RESIZE AUDIO TO: Final clip state:', {
+      id: cur.id,
+      startMs: cur.startMs,
+      endMs: cur.endMs,
+      audioOffsetMs: cur.audioOffsetMs,
+      durationMs: cur.endMs - cur.startMs
+    });
+    
     set({ audioClips });
     get().normalizeDuration(); // Extend timeline if needed
+    
+    console.log('🎵 RESIZE AUDIO TO: State updated successfully');
   },
 }));

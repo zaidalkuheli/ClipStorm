@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Play, Pause, SkipBack, SkipForward } from "lucide-react";
 import { useEditorStore, type AspectRatio } from "@/stores/editorStore";
 import { usePlaybackTimer } from "@/hooks/usePlaybackTimer";
+import { useAudioPlayback } from "@/hooks/useAudioPlayback";
 import { useAssetsStore } from "@/stores/assetsStore";
 
 // Constants
@@ -69,8 +70,9 @@ export function AutoFitFrame({ aspect, showGrid, showSafeArea, children }: Props
   const getAssetById = useAssetsStore(s => s.getById);
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Start the playback timer
+  // Start the playback timer and audio playback
   usePlaybackTimer();
+  useAudioPlayback();
 
   // Memoized current scene and asset calculation
   const current = useMemo(() => {

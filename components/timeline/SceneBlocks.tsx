@@ -9,8 +9,8 @@ import clsx from "clsx";
 
 const MIN_MS = 800;   // shorter min feels snappier
 const LIVE_GRID_MS = 1; // effectively "no snap" while moving
-const AUTO_SCROLL_THRESHOLD = 200; // pixels from edge to trigger auto-scroll (very easy to trigger)
-const AUTO_SCROLL_SPEED = 100; // pixels per frame (ULTRA fast - no hiccups)
+const AUTO_SCROLL_THRESHOLD = 100; // pixels from edge to trigger auto-scroll
+const AUTO_SCROLL_SPEED = 120; // pixels per frame - simple and reliable
 
 // Professional color palette for scene blocks
 const SCENE_COLORS = [
@@ -160,14 +160,30 @@ export function SceneBlocks() {
   const checkAutoScroll = (clientX: number) => {
     if (!containerRef.current) return;
     
-    const rect = containerRef.current.getBoundingClientRect();
+    // Get the timeline scroll area, not just the container
+    const scrollContainer = containerRef.current?.closest('.timeline-scroll-area') as HTMLElement;
+    if (!scrollContainer) return;
+    
+    const rect = scrollContainer.getBoundingClientRect();
     const distanceFromLeft = clientX - rect.left;
     const distanceFromRight = rect.right - clientX;
     
+    console.log('🎬 AUTO-SCROLL CHECK:', {
+      clientX,
+      scrollLeft: scrollContainer.scrollLeft,
+      scrollWidth: scrollContainer.scrollWidth,
+      clientWidth: scrollContainer.clientWidth,
+      distanceFromLeft,
+      distanceFromRight,
+      threshold: AUTO_SCROLL_THRESHOLD
+    });
+    
     // Start scrolling immediately when near edges - no stopping until drag ends
     if (distanceFromLeft < AUTO_SCROLL_THRESHOLD) {
+      console.log('🎬 Starting LEFT auto-scroll');
       startAutoScroll('left');
     } else if (distanceFromRight < AUTO_SCROLL_THRESHOLD) {
+      console.log('🎬 Starting RIGHT auto-scroll');
       startAutoScroll('right');
     }
     // No else clause - keep scrolling until drag ends

@@ -2,6 +2,7 @@
 import { create } from "zustand";
 import { useProjectStore } from "./projectStore";
 import { useEditorStore } from "./editorStore";
+import { computeWaveform, type WaveformData } from "@/lib/computePeaks";
 
 interface MediaAsset {
   id: string;
@@ -15,18 +16,23 @@ interface MediaAsset {
 
 interface AssetsState {
   assets: MediaAsset[];
+  waveforms: Record<string, WaveformData | undefined>;
   
   // Actions
   addAsset: (asset: MediaAsset) => void;
   removeAsset: (id: string) => void;
   clearAssets: () => void;
   loadAssetsFromProject: (projectAssets: any[]) => void;
-  getAssetsForProject: () => any[];
+  getAssetsForProject: () => Promise<any[]>,
   getById: (id: string) => MediaAsset | undefined;
+  setWaveform: (assetId: string, data: WaveformData) => void;
+  analyzeAsset: (assetId: string) => Promise<void>;
+  analyzeAllAudioAssets: () => Promise<void>;
 }
 
 export const useAssetsStore = create<AssetsState>((set, get) => ({
   assets: [],
+  waveforms: {},
 
   addAsset: (asset: MediaAsset) => {
     console.log("🔍 AssetsStore - Adding asset:", asset);
@@ -40,6 +46,11 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
     
     // Mark project as dirty when assets are added
     useProjectStore.getState().markDirty();
+
+    // Auto-analyze audio files for waveform data
+    if (asset.type === 'audio' && asset.file) {
+      get().analyzeAsset(asset.id);
+    }
   },
 
   removeAsset: (id: string) => {
@@ -57,9 +68,8 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
     // Remove any audio clips that reference this asset
     const audioClipsToRemove = editorStore.audioClips.filter(clip => clip.assetId === id);
     audioClipsToRemove.forEach(clip => {
-      editorStore.set(state => ({
-        audioClips: state.audioClips.filter(c => c.id !== clip.id)
-      }));
+      // Use the proper method to remove audio clips
+      editorStore.setAudioClips(editorStore.audioClips.filter(c => c.id !== clip.id));
     });
     
     // Mark project as dirty when assets are removed
@@ -98,6 +108,11 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
     
     console.log("🔍 AssetsStore - Loaded assets:", loadedAssets);
     set({ assets: loadedAssets });
+    
+    // Analyze audio assets for waveforms
+    setTimeout(() => {
+      get().analyzeAllAudioAssets();
+    }, 100); // Small delay to ensure state is updated
   },
 
   getAssetsForProject: async () => {
@@ -157,5 +172,79 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
   getById: (id: string) => {
     const { assets } = get();
     return assets.find(asset => asset.id === id);
+  },
+
+  setWaveform: (assetId: string, data: WaveformData) => {
+    set(state => ({
+      waveforms: {
+        ...state.waveforms,
+        [assetId]: data
+      }
+    }));
+  },
+
+  analyzeAsset: async (assetId: string) => {
+    const { assets, waveforms } = get();
+    const asset = assets.find(a => a.id === assetId);
+    
+    console.log('🎵 analyzeAsset called for:', assetId, {
+      asset: asset ? { name: asset.name, type: asset.type, hasFile: !!asset.file, hasUrl: !!asset.url } : null,
+      hasWaveform: !!waveforms[assetId]
+    });
+    
+    // Skip if not audio or already analyzed
+    if (!asset || asset.type !== 'audio' || waveforms[assetId]) {
+      console.log('🎵 Skipping analysis:', { 
+        hasAsset: !!asset, 
+        isAudio: asset?.type === 'audio', 
+        hasWaveform: !!waveforms[assetId] 
+      });
+      return;
+    }
+
+    // Need either file or URL to analyze
+    if (!asset.file && !asset.url) {
+      console.log('🎵 No file or URL available for analysis');
+      return;
+    }
+
+    try {
+      console.log('🎵 Starting waveform analysis for:', asset.name);
+      
+      let waveformData;
+      if (asset.file) {
+        // Use file if available (fresh import)
+        waveformData = await computeWaveform(asset.file);
+      } else {
+        // Use URL if no file (loaded from project)
+        console.log('🎵 Fetching audio from URL for analysis');
+        const response = await fetch(asset.url);
+        const arrayBuffer = await response.arrayBuffer();
+        const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
+        const file = new File([blob], asset.name, { type: 'audio/mpeg' });
+        waveformData = await computeWaveform(file);
+      }
+      
+      console.log('🎵 Waveform analysis complete:', {
+        name: asset.name,
+        bins: waveformData.mins.length,
+        durationMs: waveformData.durationMs,
+        sampleRate: waveformData.sampleRate
+      });
+      get().setWaveform(assetId, waveformData);
+    } catch (error) {
+      console.error('❌ Failed to analyze waveform for:', asset.name, error);
+    }
+  },
+
+  analyzeAllAudioAssets: async () => {
+    const { assets } = get();
+    const audioAssets = assets.filter(asset => asset.type === 'audio');
+    
+    console.log('🎵 Analyzing all audio assets:', audioAssets.length);
+    
+    for (const asset of audioAssets) {
+      await get().analyzeAsset(asset.id);
+    }
   }
 }));

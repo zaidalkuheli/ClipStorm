@@ -11,6 +11,12 @@ import { AudioBlocks } from "./AudioBlocks";
 import { Playhead } from "./Playhead";
 import { BlockContextMenu } from "./BlockContextMenu";
 
+function formatDuration(ms: number): string {
+  const minutes = Math.floor(ms / 60000);
+  const seconds = Math.floor((ms % 60000) / 1000);
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
 export function Timeline() {
   const durationMs = useEditorStore(s => s.durationMs);
   const pxPerSec = useEditorStore(s => s.pxPerSec);
@@ -42,7 +48,9 @@ export function Timeline() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const contentWidth = Math.max(1, (durationMs / 1000) * pxPerSec);
+  // Extend scrollable area by 50% to give users more space for dragging
+  const baseContentWidth = Math.max(1, (durationMs / 1000) * pxPerSec);
+  const contentWidth = baseContentWidth + (baseContentWidth * 0.5); // 50% extra space
 
   // Calculate precise cut position with frame snapping
   const getPreciseCutPosition = () => {
@@ -261,7 +269,7 @@ export function Timeline() {
             {/* Controls row */}
             <div className="flex items-center justify-between px-3 py-1 text-xs text-[var(--muted)]">
               <div className="flex items-center gap-3 text-[10px] text-[var(--text-tertiary)]">
-                <span>Duration: {(durationMs / 1000).toFixed(1)}s</span>
+                <span>Duration: {formatDuration(durationMs)}</span>
                 <span>Zoom: {Math.round(pxPerSec)}px/s</span>
               </div>
               <div className="flex items-center gap-2">
@@ -315,8 +323,8 @@ export function Timeline() {
                 {/* Timeline content - scrollable, starts from 0 */}
                 <div ref={scrollRef} className="flex-1 overflow-x-auto overflow-y-hidden timeline-scroll-area" onPointerDown={onPointerDown}>
               <div ref={contentRef} className="relative" style={{ width: contentWidth }}>
-                {/* Ruler */}
-                <Ruler contentWidth={contentWidth} />
+                {/* Ruler - only show actual timeline content, not extended area */}
+                <Ruler contentWidth={baseContentWidth} />
 
                 {/* Tracks - only show when there are scenes */}
                 {scenes.length > 0 && (
