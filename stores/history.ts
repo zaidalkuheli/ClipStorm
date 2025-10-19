@@ -1,12 +1,18 @@
 // stores/history.ts
 export type HistorySnapshot = {
+  tracks: {
+    id: string;
+    name: string;
+    type: "video" | "audio";
+  }[];
   scenes: { 
     id: string; 
     startMs: number; 
     endMs: number; 
     label?: string; 
     linkLeftId?: string | null; 
-    linkRightId?: string | null; 
+    linkRightId?: string | null;
+    trackId?: string;
   }[];
   audioClips: {
     id: string;
@@ -33,18 +39,21 @@ export function cloneSnapshot(s: HistorySnapshot): HistorySnapshot {
   return {
     durationMs: s.durationMs,
     playheadMs: s.playheadMs,
+    tracks: s.tracks.map(t => ({ ...t })),
     scenes: s.scenes.map(sc => ({ ...sc })),
     audioClips: s.audioClips.map(ac => ({ ...ac })),
   };
 }
 
 export function makeSnapshot(src: {
+  tracks: HistorySnapshot["tracks"];
   scenes: HistorySnapshot["scenes"];
   audioClips: HistorySnapshot["audioClips"];
   durationMs: number;
   playheadMs: number;
 }): HistorySnapshot {
   return cloneSnapshot({
+    tracks: src.tracks.map(t => ({ ...t })),
     scenes: src.scenes.map(sc => ({ ...sc })),
     audioClips: src.audioClips.map(ac => ({ ...ac })),
     durationMs: src.durationMs,
@@ -53,11 +62,13 @@ export function makeSnapshot(src: {
 }
 
 export function applySnapshot(dest: {
+  setTracks: (tracks: HistorySnapshot["tracks"]) => void;
   setScenes: (scenes: HistorySnapshot["scenes"]) => void;
   setAudioClips: (audioClips: HistorySnapshot["audioClips"]) => void;
   setDuration: (ms: number) => void;
   setPlayhead: (ms: number) => void;
 }, snap: HistorySnapshot) {
+  dest.setTracks(snap.tracks.map(t => ({ ...t })));
   dest.setScenes(snap.scenes.map(sc => ({ ...sc })));
   dest.setAudioClips(snap.audioClips.map(ac => ({ ...ac })));
   dest.setDuration(snap.durationMs);

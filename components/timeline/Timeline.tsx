@@ -2,14 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Scissors } from "lucide-react";
+import { Scissors, Plus, ChevronDown } from "lucide-react";
 import { Panel } from "@/components/ui/Panel";
 import { useEditorStore } from "@/stores/editorStore";
 import { Ruler } from "./Ruler";
 import { SceneBlocks } from "./SceneBlocks";
 import { AudioBlocks } from "./AudioBlocks";
 import { Playhead } from "./Playhead";
-import { BlockContextMenu } from "./BlockContextMenu";
+import { TrackHeader } from "./TrackHeader";
+import { Track } from "./Track";
 
 function formatDuration(ms: number): string {
   const minutes = Math.floor(ms / 60000);
@@ -37,6 +38,11 @@ export function Timeline() {
   const commitTx = useEditorStore(s => s.commitTx);
   const addSceneFromAsset = useEditorStore(s => s.addSceneFromAsset);
   const addAudioFromAsset = useEditorStore(s => s.addAudioFromAsset);
+  
+  // Track management
+  const tracks = useEditorStore(s => s.tracks);
+  const addTrack = useEditorStore(s => s.addTrack);
+  const removeTrack = useEditorStore(s => s.removeTrack);
 
   // Core editing actions
   const playheadMs = useEditorStore(s => s.playheadMs);
@@ -48,6 +54,11 @@ export function Timeline() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  
+  // Dropdown state for add track
+  const [showAddTrackDropdown, setShowAddTrackDropdown] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  
   // Extend scrollable area by 50% to give users more space for dragging
   const baseContentWidth = Math.max(1, (durationMs / 1000) * pxPerSec);
   const contentWidth = baseContentWidth + (baseContentWidth * 0.5); // 50% extra space
@@ -156,6 +167,34 @@ export function Timeline() {
     addAudioFromAsset(id, "music", { atMs, durationMs: 30000 }); // 30s default
     commitTx();
   }
+
+  const handleAddTrack = (type: "video" | "audio") => {
+    const trackCount = tracks.filter(t => t.type === type).length;
+    const trackName = `${type === "video" ? "Media" : "Audio"} ${trackCount + 1}`;
+    addTrack({ name: trackName, type });
+    setShowAddTrackDropdown(false);
+  };
+
+  const handleRemoveTrack = (trackId: string) => {
+    removeTrack(trackId);
+  };
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowAddTrackDropdown(false);
+      }
+    };
+
+    if (showAddTrackDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showAddTrackDropdown]);
 
 
   // Listen for keyboard shortcut to center playhead
@@ -311,13 +350,48 @@ export function Timeline() {
         <div className="relative flex-1 overflow-hidden">
           <div className="flex h-full">
             {/* Left labels column - fixed position, NOT scrollable */}
-            <div className="flex-shrink-0 w-16 px-2 bg-[var(--surface-primary)] border-r border-[var(--border-primary)] select-none">
-              {/* Timeline label aligned with ruler */}
-              <div className="h-8 flex items-center text-[10px] text-[var(--text-secondary)] font-medium select-none">Timeline</div>
-              {/* Video label aligned with scenes */}
-              <div className="h-16 flex items-center text-xs text-[var(--muted)] select-none">Video</div>
-              {/* Audio label aligned with audio track */}
-              <div className="h-12 flex items-center text-xs text-[var(--muted)] select-none">Audio</div>
+            <div className="flex-shrink-0 w-32 bg-[var(--surface-primary)] border-r border-[var(--border-primary)] select-none">
+              {/* Timeline label with add track button */}
+              <div className="h-8 flex items-center justify-between px-2 text-[10px] text-[var(--text-secondary)] font-medium select-none">
+                <span>Timeline</span>
+                <div className="relative" ref={dropdownRef}>
+                  <button
+                    onClick={() => setShowAddTrackDropdown(!showAddTrackDropdown)}
+                    className="p-0.5 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)] rounded transition-colors flex items-center gap-0.5"
+                    title="Add track"
+                  >
+                    <Plus size={10} />
+                    <ChevronDown size={8} />
+                  </button>
+                  
+                  {showAddTrackDropdown && (
+                    <div className="absolute top-full left-0 mt-1 w-28 bg-[var(--surface-primary)] border border-[var(--border-primary)] rounded-md shadow-lg z-50">
+                      <button
+                        onClick={() => handleAddTrack("video")}
+                        className="w-full px-2 py-1 text-left text-[10px] text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)] flex items-center gap-1"
+                      >
+                        🎬 Media
+                      </button>
+                      <button
+                        onClick={() => handleAddTrack("audio")}
+                        className="w-full px-2 py-1 text-left text-[10px] text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)] flex items-center gap-1"
+                      >
+                        🎵 Audio
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {/* Track headers */}
+              {tracks.map((track) => (
+                <TrackHeader 
+                  key={track.id} 
+                  track={track} 
+                  height={track.type === "video" ? 64 : 48}
+                  onAddTrack={handleAddTrack}
+                  onRemoveTrack={handleRemoveTrack}
+                />
+              ))}
             </div>
             
                 {/* Timeline content - scrollable, starts from 0 */}
@@ -326,49 +400,16 @@ export function Timeline() {
                 {/* Ruler - only show actual timeline content, not extended area */}
                 <Ruler contentWidth={baseContentWidth} />
 
-                {/* Tracks - only show when there are scenes */}
-                {scenes.length > 0 && (
-                  <div className="pb-3">
-                    {/* Video Track */}
-                    <div 
-                      className="mb-2 h-16 relative"
-                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }}
-                      onDrop={handleDropOnVideo}
-                    >
-                      <SceneBlocks />
-                    </div>
-                    {/* Audio Track */}
-                    <div 
-                      className="h-12 relative"
-                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }}
-                      onDrop={handleDropOnAudio}
-                    >
-                      <AudioBlocks />
-                    </div>
-                  </div>
-                )}
-                
-                {/* Show SceneBlocks even when empty for the empty state */}
-                {scenes.length === 0 && (
-                  <div className="pb-3">
-                    {/* Video Track - Empty */}
-                    <div 
-                      className="mb-2 h-16 relative"
-                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }}
-                      onDrop={handleDropOnVideo}
-                    >
-                      <SceneBlocks />
-                    </div>
-                    {/* Audio Track - Empty */}
-                    <div 
-                      className="h-12 relative"
-                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }}
-                      onDrop={handleDropOnAudio}
-                    >
-                      <AudioBlocks />
-                    </div>
-                  </div>
-                )}
+                {/* Tracks - render each track */}
+                <div className="pb-3">
+                  {tracks.map((track) => (
+                    <Track 
+                      key={track.id} 
+                      track={track} 
+                      height={track.type === "video" ? 64 : 48}
+                    />
+                  ))}
+                </div>
 
                 {/* Playhead (on top of everything inside scroll content) */}
                 <Playhead scrollRef={scrollRef} />

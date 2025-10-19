@@ -7,7 +7,7 @@ import { useAssetsStore } from "@/stores/assetsStore";
 import { BlockContextMenu } from "./BlockContextMenu";
 import clsx from "clsx";
 
-const MIN_MS = 800;   // shorter min feels snappier
+const MIN_MS = 100;   // very short min for maximum freedom
 const LIVE_GRID_MS = 1; // effectively "no snap" while moving
 const AUTO_SCROLL_THRESHOLD = 100; // pixels from edge to trigger auto-scroll
 const AUTO_SCROLL_SPEED = 120; // pixels per frame - simple and reliable
@@ -24,8 +24,12 @@ const SCENE_COLORS = [
   { bg: "#be185d", border: "#ec4899", hover: "#be185d" }, // Pink
 ];
 
-export function SceneBlocks() {
-  const scenes = useEditorStore(s => s.scenes);
+export function SceneBlocks({ trackId }: { trackId?: string }) {
+  const allScenes = useEditorStore(s => s.scenes);
+  const scenes = React.useMemo(
+    () => trackId ? allScenes.filter(s => s.trackId === trackId) : allScenes,
+    [allScenes, trackId]
+  );
   const pxPerSec = useEditorStore(s => s.pxPerSec);
   const durationMs = useEditorStore(s => s.durationMs);
   const selectedSceneId = useEditorStore(s => s.selectedSceneId);
@@ -33,6 +37,7 @@ export function SceneBlocks() {
   const selectScene = useEditorStore(s => s.selectScene);
   const moveScene = useEditorStore(s => s.moveScene);
   const snapAnimationId = useEditorStore(s => s.snapAnimationId);
+  const moveSceneToTrack = useEditorStore(s => s.moveSceneToTrack);
   
   // Core editing actions
   const playheadMs = useEditorStore(s => s.playheadMs);
@@ -106,6 +111,8 @@ export function SceneBlocks() {
     id: string;
     startX: number;
     startMs: number;
+    startY: number;
+    isVerticalDrag: boolean;
   } | null>(null);
 
   // Auto-scroll functionality - NO STOPS using setInterval
@@ -168,25 +175,14 @@ export function SceneBlocks() {
     const distanceFromLeft = clientX - rect.left;
     const distanceFromRight = rect.right - clientX;
     
-    console.log('🎬 AUTO-SCROLL CHECK:', {
-      clientX,
-      scrollLeft: scrollContainer.scrollLeft,
-      scrollWidth: scrollContainer.scrollWidth,
-      clientWidth: scrollContainer.clientWidth,
-      distanceFromLeft,
-      distanceFromRight,
-      threshold: AUTO_SCROLL_THRESHOLD
-    });
-    
-    // Start scrolling immediately when near edges - no stopping until drag ends
+    // Start scrolling immediately when near edges - stop when not near edges
     if (distanceFromLeft < AUTO_SCROLL_THRESHOLD) {
-      console.log('🎬 Starting LEFT auto-scroll');
       startAutoScroll('left');
     } else if (distanceFromRight < AUTO_SCROLL_THRESHOLD) {
-      console.log('🎬 Starting RIGHT auto-scroll');
       startAutoScroll('right');
+    } else {
+      stopAutoScroll();
     }
-    // No else clause - keep scrolling until drag ends
   };
 
   const onPointerDown = (e: React.PointerEvent, id: string, edge: "left" | "right") => {
@@ -200,7 +196,6 @@ export function SceneBlocks() {
     
     dragRef.current = { id, edge };
     document.body.style.cursor = "ew-resize";
-    console.log('🎬 Starting smooth drag:', { id, edge, sceneIndex: scenes.findIndex(s => s.id === id) });
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -232,15 +227,51 @@ export function SceneBlocks() {
     // Handle move dragging
     if (m) {
       const deltaX = contentX - m.startX;
-      const deltaMs = (deltaX / pxPerSec) * 1000;
-      const newStartMs = Math.max(0, m.startMs + deltaMs);
+      const deltaY = e.clientY - m.startY;
+      
+      // Detect if this is a vertical drag (moving between tracks)
+      if (!m.isVerticalDrag && Math.abs(deltaY) > 10 && Math.abs(deltaX) < 20) {
+        m.isVerticalDrag = true;
+      }
+      
+      if (m.isVerticalDrag) {
+        // Handle vertical drag - find target track
+        const tracks = useEditorStore.getState().tracks;
+        const currentTrack = tracks.find(t => t.id === trackId);
+        if (!currentTrack) return;
+        
+        // Find target track based on Y position
+        const trackElements = document.querySelectorAll('[data-track-id]');
+        let targetTrackId = currentTrack.id;
+        
+        for (const trackEl of trackElements) {
+          const rect = trackEl.getBoundingClientRect();
+          if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
+            targetTrackId = trackEl.getAttribute('data-track-id') || currentTrack.id;
+            break;
+          }
+        }
+        
+        // Move to target track if different
+        if (targetTrackId !== currentTrack.id) {
+          const targetTrack = tracks.find(t => t.id === targetTrackId);
+          if (targetTrack && targetTrack.type === currentTrack.type) {
+            moveSceneToTrack(m.id, targetTrackId);
+            m.startY = e.clientY; // Reset Y to prevent continuous switching
+          }
+        }
+      } else {
+        // Handle horizontal drag
+        const deltaMs = (deltaX / pxPerSec) * 1000;
+        const newStartMs = Math.max(0, m.startMs + deltaMs);
 
-      // throttle to one store update per frame
-      if (rafRef.current == null) {
-        rafRef.current = requestAnimationFrame(() => {
-          moveScene(m.id, newStartMs, pxPerSec);
-          rafRef.current = null;
-        });
+        // throttle to one store update per frame
+        if (rafRef.current == null) {
+          rafRef.current = requestAnimationFrame(() => {
+            moveScene(m.id, newStartMs, pxPerSec);
+            rafRef.current = null;
+          });
+        }
       }
     }
   };
@@ -262,7 +293,6 @@ export function SceneBlocks() {
       // final snap on release using zoom-aware grid
       const contentX = getContentX(e);
       const finalTargetMs = Math.max(0, (contentX / pxPerSec) * 1000);
-      console.log('🎬 Final snap:', { finalTargetMs, gridMs: gridMsFromZoom() });
       resizeSceneTo(d.id, d.edge, finalTargetMs, MIN_MS, gridMsFromZoom(), pxPerSec);
       
       // Commit transaction
@@ -280,7 +310,6 @@ export function SceneBlocks() {
       const deltaMs = (deltaX / pxPerSec) * 1000;
       const finalStartMs = Math.max(0, m.startMs + deltaMs);
       
-      console.log('🎬 Final move:', { finalStartMs, gridMs: gridMsFromZoom() });
       moveScene(m.id, finalStartMs, pxPerSec);
       
       // Commit transaction
@@ -308,11 +337,12 @@ export function SceneBlocks() {
     moveDragRef.current = {
       id: sceneId,
       startX: getContentX(e),
-      startMs: scene.startMs
+      startMs: scene.startMs,
+      startY: e.clientY,
+      isVerticalDrag: false
     };
     
     document.body.style.cursor = "grabbing";
-    console.log('🎬 Starting scene move:', { sceneId, startMs: scene.startMs });
   };
 
   return (

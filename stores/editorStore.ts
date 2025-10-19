@@ -54,6 +54,12 @@ function unlinkLeft(cur: Scene, prev?: Scene) {
   if (prev.linkRightId === cur.id) prev.linkRightId = null;
 }
 
+export type Track = {
+  id: string;
+  name: string;
+  type: "video" | "audio";
+};
+
 export type Scene = { 
   id: string; 
   label?: string; 
@@ -63,6 +69,7 @@ export type Scene = {
   linkLeftId?: string | null;
   linkRightId?: string | null;
   assetId?: string | null; // NEW optional asset binding
+  trackId?: string; // NEW track assignment
   // Transform data for media editing
   transform?: {
     x: number;
@@ -100,6 +107,7 @@ interface EditorState {
   isPlaying: boolean;
   playbackSpeed: number; // 1.0 = normal speed
 
+  tracks: Track[];
   scenes: Scene[];
   selectedSceneId: string | null;
   snapAnimationId: string | null; // Track which scene just snapped for animation
@@ -117,6 +125,10 @@ interface EditorState {
   toggleSafeArea: () => void;
   toggleGrid: () => void;
 
+  setTracks: (tracks: Track[]) => void;
+  addTrack: (track: Omit<Track, 'id'>) => void;
+  removeTrack: (id: string) => void;
+  renameTrack: (id: string, name: string) => void;
   setScenes: (scenes: Scene[]) => void;
   setAudioClips: (audioClips: AudioClip[]) => void;
   setDuration: (durationMs: number) => void;
@@ -128,6 +140,7 @@ interface EditorState {
   selectScene: (id: string | null) => void;
   triggerSnapAnimation: (id: string) => void;
   updateSceneTransform: (id: string, transform: { x: number; y: number; scale: number }) => void;
+  moveSceneToTrack: (sceneId: string, trackId: string) => void;
 
   // core editing actions
   selectedAudioId: string | null;
@@ -165,6 +178,7 @@ interface EditorState {
 
   // serialization
   getSerializableState: () => {
+    tracks: Track[];
     scenes: Scene[];
     audioClips: AudioClip[];
     durationMs: number;
@@ -188,12 +202,12 @@ interface EditorState {
   setPlaybackSpeed: (speed: number) => void;
 }
 
-const initialScenes = [
-  { id: nanoid(), label: "Scene 1", startMs: 0, endMs: 5000 },
-  { id: nanoid(), label: "Scene 2", startMs: 5000, endMs: 11000 },
-  { id: nanoid(), label: "Scene 3", startMs: 11000, endMs: 17000 },
-  { id: nanoid(), label: "Scene 4", startMs: 17000, endMs: 20000 }
+const initialTracks = [
+  { id: "video-track-1", name: "Media 1", type: "video" as const },
+  { id: "audio-track-1", name: "Audio 1", type: "audio" as const }
 ];
+
+const initialScenes: Scene[] = [];
 
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 
@@ -220,6 +234,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   isPlaying: false,
   playbackSpeed: 1.0,
 
+  tracks: initialTracks,
   scenes: initialScenes,
   selectedSceneId: null,
   snapAnimationId: null,
@@ -236,6 +251,45 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setFps: (fps) => set({ fps }),
   toggleSafeArea: () => set(state => ({ showSafeArea: !state.showSafeArea })),
   toggleGrid: () => set(state => ({ showGrid: !state.showGrid })),
+
+  setTracks: (tracks) => set({ tracks }),
+  
+  addTrack: (trackData) => {
+    const newTrack: Track = {
+      id: nanoid(),
+      ...trackData
+    };
+    set(state => ({ tracks: [...state.tracks, newTrack] }));
+  },
+  
+  removeTrack: (id) => {
+    const { tracks, scenes, audioClips } = get();
+    const trackToDelete = tracks.find(t => t.id === id);
+    if (trackToDelete) {
+      // Always delete scenes that belong to this track
+      const updatedScenes = scenes.filter(scene => scene.trackId !== id);
+      
+      // If deleting an audio track, also delete all audio clips
+      let updatedAudioClips = audioClips;
+      if (trackToDelete.type === 'audio') {
+        updatedAudioClips = [];
+      }
+      
+      set({ 
+        tracks: tracks.filter(t => t.id !== id),
+        scenes: updatedScenes,
+        audioClips: updatedAudioClips
+      });
+    }
+  },
+  
+  renameTrack: (id, name) => {
+    set(state => ({
+      tracks: state.tracks.map(track => 
+        track.id === id ? { ...track, name } : track
+      )
+    }));
+  },
 
   setScenes: (scenes) => {
     const { audioClips } = get();
@@ -391,14 +445,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       // Magnetic linking resize action
       resizeSceneTo: (id: string, edge: "left" | "right", targetMs: number, minMs: number, gridMs: number, pxPerSec: number) => {
         const { scenes: s, durationMs, triggerSnapAnimation } = get();
-        const scenes = [...s].sort((a,b)=>a.startMs-b.startMs);
+        const sortedScenes = [...s].sort((a,b)=>a.startMs-b.startMs);
 
-        const i = scenes.findIndex(sc => sc.id === id);
+        const i = sortedScenes.findIndex(sc => sc.id === id);
         if (i < 0) return;
 
-        const cur = scenes[i];
-        const prev = scenes[i-1];
-        const next = scenes[i+1];
+        const cur = sortedScenes[i];
+        const prev = sortedScenes[i-1];
+        const next = sortedScenes[i+1];
 
         const snapMs = pxToMs(SNAP_PX, pxPerSec);
         const unlinkMs = pxToMs(UNLINK_PX, pxPerSec);
@@ -476,7 +530,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           }
         }
 
-        set({ scenes });
+        set({ scenes: sortedScenes });
         get().normalizeDuration(); // Extend timeline if needed
       },
 
@@ -488,15 +542,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         setTimeout(() => set({ snapAnimationId: null }), 400);
       },
 
-      updateSceneTransform: (id, transform) => {
-        set(state => ({
-          scenes: state.scenes.map(scene => 
-            scene.id === id ? { ...scene, transform } : scene
-          )
-        }));
-      },
+  updateSceneTransform: (id, transform) => {
+    set(state => ({
+      scenes: state.scenes.map(scene => 
+        scene.id === id ? { ...scene, transform } : scene
+      )
+    }));
+  },
 
-      setPlayhead: (ms) => {
+  moveSceneToTrack: (sceneId, trackId) => {
+    set(state => ({
+      scenes: state.scenes.map(scene => 
+        scene.id === sceneId ? { ...scene, trackId } : scene
+      )
+    }));
+  },
+
+  setPlayhead: (ms) => {
     const durationMs = get().durationMs;
     set({ playheadMs: clamp(ms, 0, durationMs) });
   },
@@ -524,11 +586,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   // history actions
   getSnapshot: (): HistorySnapshot => {
-    const { scenes, audioClips, durationMs, playheadMs } = get();
+    const { tracks, scenes, audioClips, durationMs, playheadMs } = get();
     // ensure scenes and audio clips are sorted & normalized
+    const sortedTracks = [...tracks].map(t=>({ ...t }));
     const sortedScenes = [...scenes].sort((a,b)=>a.startMs-b.startMs).map(s=>({ ...s }));
     const sortedAudioClips = [...audioClips].sort((a,b)=>a.startMs-b.startMs).map(a=>({ ...a }));
-    return makeSnapshot({ scenes: sortedScenes, audioClips: sortedAudioClips, durationMs, playheadMs });
+    return makeSnapshot({ tracks: sortedTracks, scenes: sortedScenes, audioClips: sortedAudioClips, durationMs, playheadMs });
   },
 
   beginTx: () => {
@@ -565,6 +628,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
     applySnapshot(
       { 
+        setTracks: (tracks)=> set({ tracks }),
         setScenes: (scenes)=> set({ scenes }),
         setAudioClips: (audioClips)=> set({ audioClips }),
         setDuration: (ms)=> set({ durationMs: ms }),
@@ -583,6 +647,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const curr = get().getSnapshot();
     applySnapshot(
       { 
+        setTracks: (tracks)=> set({ tracks }),
         setScenes: (scenes)=> set({ scenes }),
         setAudioClips: (audioClips)=> set({ audioClips }),
         setDuration: (ms)=> set({ durationMs: ms }),
@@ -603,6 +668,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const curr = get().getSnapshot();
     applySnapshot(
       { 
+        setTracks: (tracks)=> set({ tracks }),
         setScenes: (scenes)=> set({ scenes }),
         setAudioClips: (audioClips)=> set({ audioClips }),
         setDuration: (ms)=> set({ durationMs: ms }),
@@ -620,8 +686,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   // serialization
   getSerializableState: () => {
-    const { scenes, audioClips, durationMs, fps, aspect, resolution } = get();
+    const { tracks, scenes, audioClips, durationMs, fps, aspect, resolution } = get();
     return {
+      tracks: [...tracks],
       scenes: [...scenes].sort((a, b) => a.startMs - b.startMs),
       audioClips: [...audioClips].sort((a, b) => a.startMs - b.startMs),
       durationMs,
@@ -663,23 +730,107 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   addSceneFromAsset: (assetId, opts) => {
-    const at = typeof opts?.atMs === "number" ? Math.max(0, opts.atMs) : get().computeInsertMs();
+    // Always place at start of track if no specific position is given and timeline is empty
+    const { scenes, audioClips } = get();
+    const isTimelineEmpty = scenes.length === 0 && audioClips.length === 0;
+    const at = typeof opts?.atMs === "number" ? Math.max(0, opts.atMs) : (isTimelineEmpty ? 0 : get().computeInsertMs());
     const dflt = opts?.durationMs ?? 3000; // images=3s, videos=5s set by caller
     const id = crypto.randomUUID();
     const label = opts?.label;
-    const scene = { id, startMs: at, endMs: at + dflt, label, assetId, linkLeftId: null, linkRightId: null };
+    
+    // Find appropriate track based on asset type
+    const { tracks } = get();
+    const asset = useAssetsStore.getState().getById(assetId);
+    const trackType = asset?.type === 'image' || asset?.type === 'video' ? 'video' : 'audio';
+    let defaultTrack = tracks.find(t => t.type === trackType);
+    
+    // If no track of the required type exists, create one
+    if (!defaultTrack) {
+      const trackCount = tracks.filter(t => t.type === trackType).length;
+      const trackName = `${trackType === "video" ? "Media" : "Audio"} ${trackCount + 1}`;
+      const newTrack = { id: nanoid(), name: trackName, type: trackType };
+      
+      // If this is the first track being created, only create the track type needed
+      if (tracks.length === 0) {
+        if (trackType === 'video') {
+          // Only create media track for video content
+          set(state => ({ tracks: [newTrack] }));
+          defaultTrack = newTrack;
+        } else {
+          // Only create audio track for audio content
+          set(state => ({ tracks: [newTrack] }));
+          defaultTrack = newTrack;
+        }
+      } else {
+        // Insert new track in the correct position (media tracks before audio tracks)
+        const mediaTracks = tracks.filter(t => t.type === 'video');
+        const audioTracks = tracks.filter(t => t.type === 'audio');
+        
+        let newTracks;
+        if (trackType === 'video') {
+          newTracks = [...mediaTracks, newTrack, ...audioTracks];
+        } else {
+          newTracks = [...mediaTracks, ...audioTracks, newTrack];
+        }
+        
+        set(state => ({ tracks: newTracks }));
+        defaultTrack = newTrack;
+      }
+    }
+    
+    const scene = { 
+      id, 
+      startMs: at, 
+      endMs: at + dflt, 
+      label, 
+      assetId, 
+      trackId: defaultTrack.id,
+      linkLeftId: null, 
+      linkRightId: null 
+    };
     // prevent overlap: shift if needed
-    const scenes = [...get().scenes, scene].sort((a,b)=>a.startMs-b.startMs);
-    set({ scenes });
+    const updatedScenes = [...scenes, scene].sort((a,b)=>a.startMs-b.startMs);
+    set({ scenes: updatedScenes });
     get().normalizeDuration();
     set(state => ({ history: { ...state.history, future: [] }})); // clear redo on new insert
     return id;
   },
 
   addAudioFromAsset: (assetId, kind, opts) => {
-    const at = typeof opts?.atMs === "number" ? Math.max(0, opts.atMs) : get().computeAudioInsertMs();
+    // Always place at start of track if no specific position is given and timeline is empty
+    const { scenes, audioClips } = get();
+    const isTimelineEmpty = scenes.length === 0 && audioClips.length === 0;
+    const at = typeof opts?.atMs === "number" ? Math.max(0, opts.atMs) : (isTimelineEmpty ? 0 : get().computeAudioInsertMs());
     const dflt = opts?.durationMs ?? 30000; // 30s default, will be updated with actual duration
     const id = crypto.randomUUID();
+    
+    // Find appropriate track based on asset type
+    const { tracks } = get();
+    const trackType = 'audio';
+    let defaultTrack = tracks.find(t => t.type === trackType);
+    
+    // If no audio track exists, create one
+    if (!defaultTrack) {
+      const trackCount = tracks.filter(t => t.type === trackType).length;
+      const trackName = `Audio ${trackCount + 1}`;
+      const newTrack = { id: nanoid(), name: trackName, type: trackType };
+      
+      // If this is the first track being created, only create the track type needed
+      if (tracks.length === 0) {
+        // Only create audio track for audio content
+        set(state => ({ tracks: [newTrack] }));
+        defaultTrack = newTrack;
+      } else {
+        // Insert new track in the correct position (media tracks before audio tracks)
+        const mediaTracks = tracks.filter(t => t.type === 'video');
+        const audioTracks = tracks.filter(t => t.type === 'audio');
+        
+        const newTracks = [...mediaTracks, ...audioTracks, newTrack];
+        set(state => ({ tracks: newTracks }));
+        defaultTrack = newTrack;
+      }
+    }
+    
     const clip = { id, startMs: at, endMs: at + dflt, assetId, kind, originalDurationMs: dflt };
     set({ audioClips: [...get().audioClips, clip].sort((a,b)=>a.startMs-b.startMs) });
     get().normalizeDuration();

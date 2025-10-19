@@ -18,6 +18,13 @@ const TransformSchema = z.object({
   scale: z.number(),
 });
 
+// Track schema
+const TrackSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  type: z.enum(["video", "audio"]),
+});
+
 // Scene schema (matches editor store Scene type)
 const SceneSchema = z.object({
   id: z.string(),
@@ -28,6 +35,7 @@ const SceneSchema = z.object({
   linkRightId: z.string().nullable().optional(),
   assetId: z.string().nullable().optional(), // NEW optional
   transform: TransformSchema.nullable().optional(), // NEW transform data
+  trackId: z.string().optional(), // NEW track assignment
 });
 
 // Project metadata
@@ -49,6 +57,7 @@ const SettingsSchema = z.object({
 
 // Timeline data
 const TimelineSchema = z.object({
+  tracks: z.array(TrackSchema),
   scenes: z.array(SceneSchema),
 });
 
@@ -90,6 +99,10 @@ export function makeEmptyProject(name?: string): Project {
     },
     assets: [],
     timeline: {
+      tracks: [
+        { id: "video-track-1", name: "Media 1", type: "video" },
+        { id: "audio-track-1", name: "Audio 1", type: "audio" }
+      ],
       scenes: [], // Start with empty timeline for clean UI
     },
   };
@@ -146,6 +159,7 @@ export function migrateToLatest(data: unknown): Project {
 
 export function projectToEditor(project: Project) {
   return {
+    tracks: project.timeline.tracks,
     scenes: project.timeline.scenes,
     durationMs: project.settings.durationMs,
     fps: project.settings.fps,
@@ -156,6 +170,11 @@ export function projectToEditor(project: Project) {
 
 export function editorToProject(
   editorState: {
+    tracks: Array<{
+      id: string;
+      name: string;
+      type: "video" | "audio";
+    }>;
     scenes: Array<{
       id: string;
       label?: string;
@@ -163,6 +182,7 @@ export function editorToProject(
       endMs: number;
       linkLeftId?: string | null;
       linkRightId?: string | null;
+      trackId?: string;
     }>;
     durationMs: number;
     fps: number;
@@ -189,6 +209,7 @@ export function editorToProject(
       },
       assets: assets || existingProject.assets, // Include assets
       timeline: {
+        tracks: editorState.tracks,
         scenes: editorState.scenes,
       },
     };
@@ -211,6 +232,7 @@ export function editorToProject(
     },
     assets: assets || [], // Include assets
     timeline: {
+      tracks: editorState.tracks,
       scenes: editorState.scenes,
     },
   };
