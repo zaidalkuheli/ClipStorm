@@ -17,6 +17,13 @@ export function AppHeader() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const projectButtonRef = useRef<HTMLButtonElement>(null);
   
+  // Editor actions for keyboard shortcuts
+  const playheadMs = useEditorStore(s => s.playheadMs);
+  const splitAt = useEditorStore(s => s.splitAt);
+  const deleteSelection = useEditorStore(s => s.deleteSelection);
+  const beginTx = useEditorStore(s => s.beginTx);
+  const commitTx = useEditorStore(s => s.commitTx);
+  
   // History actions
   const undo = useEditorStore(s => s.undo);
   const redo = useEditorStore(s => s.redo);
@@ -181,11 +188,22 @@ export function AppHeader() {
   // Keyboard shortcuts for undo/redo and save
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Don't trigger shortcuts when typing in inputs
+      const activeElement = document.activeElement;
+      const isInput = activeElement?.tagName === 'INPUT' || 
+                     activeElement?.tagName === 'TEXTAREA' || 
+                     activeElement?.contentEditable === 'true';
+      
+      if (isInput) return;
+
       const z = e.key.toLowerCase() === "z";
       const s = e.key.toLowerCase() === "s";
+      const deleteKey = e.key === "Delete" || e.key === "Backspace";
+      const f = e.key.toLowerCase() === "f"; // Focus/center playhead
       const isMac = navigator.platform.toLowerCase().includes("mac");
       const meta = isMac ? e.metaKey : e.ctrlKey;
 
+      // Existing shortcuts
       if (meta && z && !e.shiftKey) { 
         e.preventDefault(); 
         undo(); 
@@ -198,10 +216,36 @@ export function AppHeader() {
         e.preventDefault();
         handleSave();
       }
+
+      // New editing shortcuts
+      if (s && !meta && !e.shiftKey) {
+        e.preventDefault();
+        beginTx("Split at playhead");
+        splitAt(playheadMs);
+        commitTx();
+      }
+      
+      if (deleteKey && !meta && !e.shiftKey) {
+        e.preventDefault();
+        deleteSelection({ ripple: false });
+      }
+      
+      if (deleteKey && !meta && e.shiftKey) {
+        e.preventDefault();
+        deleteSelection({ ripple: true });
+      }
+      
+      // Focus/center playhead shortcut
+      if (f && !meta && !e.shiftKey) {
+        e.preventDefault();
+        // Trigger zoom-to-playhead functionality
+        // We'll dispatch a custom event that the Timeline component can listen to
+        window.dispatchEvent(new CustomEvent('zoomToPlayhead'));
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo, handleSave]);
+  }, [undo, redo, handleSave, playheadMs, splitAt, deleteSelection, beginTx, commitTx]);
 
   // Close project menu when clicking outside
   useEffect(() => {

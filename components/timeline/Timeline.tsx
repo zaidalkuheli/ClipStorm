@@ -1,17 +1,22 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Scissors } from "lucide-react";
 import { Panel } from "@/components/ui/Panel";
 import { useEditorStore } from "@/stores/editorStore";
 import { Ruler } from "./Ruler";
 import { SceneBlocks } from "./SceneBlocks";
+import { AudioBlocks } from "./AudioBlocks";
 import { Playhead } from "./Playhead";
+import { BlockContextMenu } from "./BlockContextMenu";
 
 export function Timeline() {
   const durationMs = useEditorStore(s => s.durationMs);
   const pxPerSec = useEditorStore(s => s.pxPerSec);
   const zoomIn = useEditorStore(s => s.zoomIn);
   const zoomOut = useEditorStore(s => s.zoomOut);
+  const zoomToPlayhead = useEditorStore(s => s.zoomToPlayhead);
   const setPlayhead = useEditorStore(s => s.setPlayhead);
   const nudgePlayhead = useEditorStore(s => s.nudgePlayhead);
   const togglePlayback = useEditorStore(s => s.togglePlayback);
@@ -27,9 +32,87 @@ export function Timeline() {
   const addSceneFromAsset = useEditorStore(s => s.addSceneFromAsset);
   const addAudioFromAsset = useEditorStore(s => s.addAudioFromAsset);
 
+  // Core editing actions
+  const playheadMs = useEditorStore(s => s.playheadMs);
+  const splitAt = useEditorStore(s => s.splitAt);
+  const deleteSelection = useEditorStore(s => s.deleteSelection);
+  const duplicateSelection = useEditorStore(s => s.duplicateSelection);
+  const selectedAudioId = useEditorStore(s => s.selectedAudioId);
+  const fps = useEditorStore(s => s.fps);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const contentWidth = Math.max(1, (durationMs / 1000) * pxPerSec);
+
+  // Calculate precise cut position with frame snapping
+  const getPreciseCutPosition = () => {
+    const frameMs = 1000 / fps; // milliseconds per frame
+    return Math.round(playheadMs / frameMs) * frameMs;
+  };
+
+  // Smart zoom functions that zoom around viewport center (like mouse wheel)
+  const handleZoomIn = () => {
+    const scrollContainer = contentRef.current;
+    if (!scrollContainer) {
+      zoomIn();
+      return;
+    }
+    
+    const prevPxPerSec = pxPerSec;
+    const newPxPerSec = Math.min(1000, Math.max(5, prevPxPerSec * 1.2));
+    const scale = newPxPerSec / prevPxPerSec;
+    
+    // Calculate viewport center
+    const containerWidth = scrollContainer.clientWidth;
+    const viewportCenter = scrollContainer.scrollLeft + (containerWidth / 2);
+    
+    // Apply zoom
+    zoomIn();
+    
+    // Adjust scroll to keep viewport center stable
+    const newViewportCenter = viewportCenter * scale;
+    scrollContainer.scrollLeft = newViewportCenter - (containerWidth / 2);
+  };
+
+  const handleZoomOut = () => {
+    const scrollContainer = contentRef.current;
+    if (!scrollContainer) {
+      zoomOut();
+      return;
+    }
+    
+    const prevPxPerSec = pxPerSec;
+    const newPxPerSec = Math.min(1000, Math.max(5, prevPxPerSec / 1.2));
+    const scale = newPxPerSec / prevPxPerSec;
+    
+    // Calculate viewport center
+    const containerWidth = scrollContainer.clientWidth;
+    const viewportCenter = scrollContainer.scrollLeft + (containerWidth / 2);
+    
+    // Apply zoom
+    zoomOut();
+    
+    // Adjust scroll to keep viewport center stable
+    const newViewportCenter = viewportCenter * scale;
+    scrollContainer.scrollLeft = newViewportCenter - (containerWidth / 2);
+  };
+
+  // Handle zoom to playhead with scrolling
+  const handleZoomToPlayhead = () => {
+    const playheadPx = zoomToPlayhead();
+    const scrollContainer = contentRef.current;
+    if (scrollContainer) {
+      // Center the playhead in the viewport
+      const containerWidth = scrollContainer.clientWidth;
+      const targetScrollLeft = playheadPx - (containerWidth / 2);
+      
+      // Smooth scroll to the playhead position
+      scrollContainer.scrollTo({
+        left: Math.max(0, targetScrollLeft),
+        behavior: 'smooth'
+      });
+    }
+  };
 
   // Drag & Drop handlers
   function getMsFromClientX(clientX: number) {
@@ -44,6 +127,7 @@ export function Timeline() {
     if (!data) return;
     e.preventDefault();
     const { id, type } = JSON.parse(data);
+    // Only accept image and video in video track
     if (type !== "image" && type !== "video") return;
 
     const atMs = getMsFromClientX(e.clientX);
@@ -61,9 +145,20 @@ export function Timeline() {
     if (type !== "audio") return;
     const atMs = getMsFromClientX(e.clientX);
     beginTx("Drop asset (audio)");
-    addAudioFromAsset(id, "music", { atMs, durationMs: 8000 });
+    addAudioFromAsset(id, "music", { atMs, durationMs: 30000 }); // 30s default
     commitTx();
   }
+
+
+  // Listen for keyboard shortcut to center playhead
+  useEffect(() => {
+    const handleZoomToPlayheadEvent = () => {
+      handleZoomToPlayhead();
+    };
+    
+    window.addEventListener('zoomToPlayhead', handleZoomToPlayheadEvent);
+    return () => window.removeEventListener('zoomToPlayhead', handleZoomToPlayheadEvent);
+  }, [handleZoomToPlayhead]);
 
   // Mouse wheel to zoom at mouse position (Ctrl/⌘ for fine control)
   useEffect(() => {
@@ -91,7 +186,7 @@ export function Timeline() {
       const zoomFactor = e.deltaY < 0 ? baseZoomFactor : 1 / baseZoomFactor;
 
       // compute new zoom & keep the mouse focus point stable
-      const newPxPerSec = Math.min(500, Math.max(20, prevPxPerSec * zoomFactor));
+      const newPxPerSec = Math.min(1000, Math.max(5, prevPxPerSec * zoomFactor));
       const scale = newPxPerSec / prevPxPerSec;
       sc.scrollLeft = mouseX * scale - (e.clientX - rect.left);
 
@@ -170,8 +265,15 @@ export function Timeline() {
                 <span>Zoom: {Math.round(pxPerSec)}px/s</span>
               </div>
               <div className="flex items-center gap-2">
-                <button className="badge" onClick={zoomOut}>Zoom Out</button>
-                <button className="badge" onClick={zoomIn}>Zoom In</button>
+                <button className="badge" onClick={handleZoomOut}>Zoom Out</button>
+                <button className="badge" onClick={handleZoomIn}>Zoom In</button>
+                <button 
+                  className="badge bg-blue-600/20 text-blue-400 border-blue-500/30" 
+                  onClick={handleZoomToPlayhead}
+                  title="Center playhead in view (F)"
+                >
+                  🎯 Center
+                </button>
                 <button 
                   className="badge bg-green-600/20 text-green-400 border-green-500/30" 
                   onClick={() => addScene({ 
@@ -181,6 +283,18 @@ export function Timeline() {
                   })}
                 >
                   + Add Scene
+                </button>
+                <button 
+                  className="badge bg-red-600/20 text-red-400 border-red-500/30" 
+                  onClick={() => {
+                    const preciseCutMs = getPreciseCutPosition();
+                    beginTx("Split at playhead");
+                    splitAt(preciseCutMs);
+                    commitTx();
+                  }}
+                  title={`Split at playhead (S) - ${Math.round(getPreciseCutPosition())}ms`}
+                >
+                  <Scissors size={12} />
                 </button>
               </div>
             </div>
@@ -221,21 +335,7 @@ export function Timeline() {
                       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }}
                       onDrop={handleDropOnAudio}
                     >
-                      <div className="h-12 rounded-md border border-[var(--border)] bg-[#0f1116]/60 p-2 flex gap-2">
-                        {/* Render audio clips here */}
-                        {audioClips.map((clip) => (
-                          <div 
-                            key={clip.id}
-                            className="h-8 rounded-sm bg-blue-500/60 border border-blue-400/50 flex items-center px-2 text-xs text-white"
-                            style={{ 
-                              width: Math.max(20, pxToMs(clip.endMs - clip.startMs)),
-                              marginLeft: pxToMs(clip.startMs)
-                            }}
-                          >
-                            {clip.kind}
-                          </div>
-                        ))}
-                      </div>
+                      <AudioBlocks />
                     </div>
                   </div>
                 )}
@@ -257,9 +357,7 @@ export function Timeline() {
                       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }}
                       onDrop={handleDropOnAudio}
                     >
-                      <div className="h-12 rounded-md border border-[var(--border)] bg-[#0f1116]/60 p-2 flex gap-2">
-                        {/* Empty audio track */}
-                      </div>
+                      <AudioBlocks />
                     </div>
                   </div>
                 )}

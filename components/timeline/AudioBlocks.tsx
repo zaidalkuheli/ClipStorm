@@ -1,7 +1,6 @@
 "use client";
 import React, { useState } from "react";
 import { createPortal } from "react-dom";
-import { Scissors } from "lucide-react";
 import { useEditorStore, SNAP_PX } from "@/stores/editorStore";
 import { useAssetsStore } from "@/stores/assetsStore";
 import { BlockContextMenu } from "./BlockContextMenu";
@@ -12,9 +11,9 @@ const LIVE_GRID_MS = 1; // effectively "no snap" while moving
 const AUTO_SCROLL_THRESHOLD = 200; // pixels from edge to trigger auto-scroll (very easy to trigger)
 const AUTO_SCROLL_SPEED = 100; // pixels per frame (ULTRA fast - no hiccups)
 
-// Professional color palette for scene blocks
-const SCENE_COLORS = [
-  { bg: "#1e3a8a", border: "#3b82f6", hover: "#1e40af" }, // Blue
+// Professional color palette for audio blocks
+const AUDIO_COLORS = [
+  { bg: "#1e40af", border: "#3b82f6", hover: "#1e3a8a" }, // Blue
   { bg: "#7c2d12", border: "#ea580c", hover: "#9a3412" }, // Orange  
   { bg: "#166534", border: "#22c55e", hover: "#15803d" }, // Green
   { bg: "#7c2d12", border: "#f59e0b", hover: "#9a3412" }, // Amber
@@ -24,14 +23,14 @@ const SCENE_COLORS = [
   { bg: "#be185d", border: "#ec4899", hover: "#be185d" }, // Pink
 ];
 
-export function SceneBlocks() {
-  const scenes = useEditorStore(s => s.scenes);
+export function AudioBlocks() {
+  const audioClips = useEditorStore(s => s.audioClips);
   const pxPerSec = useEditorStore(s => s.pxPerSec);
   const durationMs = useEditorStore(s => s.durationMs);
-  const selectedSceneId = useEditorStore(s => s.selectedSceneId);
-  const resizeSceneTo = useEditorStore(s => s.resizeSceneTo);
-  const selectScene = useEditorStore(s => s.selectScene);
-  const moveScene = useEditorStore(s => s.moveScene);
+  const selectedAudioId = useEditorStore(s => s.selectedAudioId);
+  const resizeAudioTo = useEditorStore(s => s.resizeAudioTo);
+  const selectAudio = useEditorStore(s => s.selectAudio);
+  const moveAudio = useEditorStore(s => s.moveAudio);
   const snapAnimationId = useEditorStore(s => s.snapAnimationId);
   
   // Core editing actions
@@ -45,7 +44,7 @@ export function SceneBlocks() {
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
-    sceneId: string;
+    audioId: string;
   } | null>(null);
   
   // Transaction methods
@@ -138,12 +137,21 @@ export function SceneBlocks() {
         return;
       }
       
+      const scrollContainer = autoScrollRef.current.scrollContainer;
       const scrollAmount = autoScrollRef.current.direction === 'left' 
         ? -AUTO_SCROLL_SPEED 
         : AUTO_SCROLL_SPEED;
       
-      // Direct scroll - no conditions, no checks
-      autoScrollRef.current.scrollContainer.scrollLeft += scrollAmount;
+      const newScrollLeft = scrollContainer.scrollLeft + scrollAmount;
+      const maxScrollLeft = scrollContainer.scrollWidth - scrollContainer.clientWidth;
+      
+      // Check bounds before scrolling
+      if (newScrollLeft >= 0 && newScrollLeft <= maxScrollLeft) {
+        scrollContainer.scrollLeft = newScrollLeft;
+      } else {
+        // Stop scrolling if we've reached the boundary
+        stopAutoScroll();
+      }
     }, 16); // ~60fps
   };
 
@@ -176,7 +184,7 @@ export function SceneBlocks() {
   const onPointerDown = (e: React.PointerEvent, id: string, edge: "left" | "right") => {
     if (!containerRef.current) return;
     e.preventDefault();
-    e.stopPropagation(); // Prevent scene move when resizing
+    e.stopPropagation(); // Prevent audio move when resizing
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     
     // Begin transaction for resize
@@ -184,7 +192,7 @@ export function SceneBlocks() {
     
     dragRef.current = { id, edge };
     document.body.style.cursor = "ew-resize";
-    console.log('🎬 Starting smooth drag:', { id, edge, sceneIndex: scenes.findIndex(s => s.id === id) });
+    console.log('🎵 Starting smooth audio drag:', { id, edge, audioIndex: audioClips.findIndex(a => a.id === id) });
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -207,7 +215,7 @@ export function SceneBlocks() {
       // throttle to one store update per frame
       if (rafRef.current == null) {
         rafRef.current = requestAnimationFrame(() => {
-          resizeSceneTo(d.id, d.edge, targetMs, MIN_MS, LIVE_GRID_MS, pxPerSec); // live: no snap
+          resizeAudioTo(d.id, d.edge, targetMs, MIN_MS, LIVE_GRID_MS, pxPerSec); // live: no snap
           rafRef.current = null;
         });
       }
@@ -222,7 +230,7 @@ export function SceneBlocks() {
       // throttle to one store update per frame
       if (rafRef.current == null) {
         rafRef.current = requestAnimationFrame(() => {
-          moveScene(m.id, newStartMs, pxPerSec);
+          moveAudio(m.id, newStartMs, pxPerSec);
           rafRef.current = null;
         });
       }
@@ -246,8 +254,8 @@ export function SceneBlocks() {
       // final snap on release using zoom-aware grid
       const contentX = getContentX(e);
       const finalTargetMs = Math.max(0, (contentX / pxPerSec) * 1000);
-      console.log('🎬 Final snap:', { finalTargetMs, gridMs: gridMsFromZoom() });
-      resizeSceneTo(d.id, d.edge, finalTargetMs, MIN_MS, gridMsFromZoom(), pxPerSec);
+      console.log('🎵 Final snap:', { finalTargetMs, gridMs: gridMsFromZoom() });
+      resizeAudioTo(d.id, d.edge, finalTargetMs, MIN_MS, gridMsFromZoom(), pxPerSec);
       
       // Commit transaction
       commitTx();
@@ -264,88 +272,87 @@ export function SceneBlocks() {
       const deltaMs = (deltaX / pxPerSec) * 1000;
       const finalStartMs = Math.max(0, m.startMs + deltaMs);
       
-      console.log('🎬 Final move:', { finalStartMs, gridMs: gridMsFromZoom() });
-      moveScene(m.id, finalStartMs, pxPerSec);
+      console.log('🎵 Final move:', { finalStartMs, gridMs: gridMsFromZoom() });
+      moveAudio(m.id, finalStartMs, pxPerSec);
       
       // Commit transaction
       commitTx();
     }
   };
 
-  const onSceneClick = (e: React.MouseEvent, sceneId: string) => {
+  const onAudioClick = (e: React.MouseEvent, audioId: string) => {
     e.stopPropagation();
-    selectScene(sceneId);
+    selectAudio(audioId);
   };
 
-  const onScenePointerDown = (e: React.PointerEvent, sceneId: string) => {
+  const onAudioPointerDown = (e: React.PointerEvent, audioId: string) => {
     if (!containerRef.current) return;
     e.preventDefault();
     e.stopPropagation();
     
-    const scene = scenes.find(s => s.id === sceneId);
-    if (!scene) return;
+    const audio = audioClips.find(a => a.id === audioId);
+    if (!audio) return;
     
     // Begin transaction for move
-    beginTx(`Move scene`);
+    beginTx(`Move audio`);
     
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     moveDragRef.current = {
-      id: sceneId,
+      id: audioId,
       startX: getContentX(e),
-      startMs: scene.startMs
+      startMs: audio.startMs
     };
     
     document.body.style.cursor = "grabbing";
-    console.log('🎬 Starting scene move:', { sceneId, startMs: scene.startMs });
+    console.log('🎵 Starting audio move:', { audioId, startMs: audio.startMs });
   };
 
   return (
     <div
       ref={containerRef}
-      className="relative h-16 pr-3"
+      className="relative h-12 pr-3"
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
     >
       <div className="relative h-full" style={{ width: Math.max(1, msToPx(durationMs)) }}>
-        {scenes.length === 0 ? (
+        {audioClips.length === 0 ? (
           // Empty state - clean and minimal
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="text-center">
-              <div className="text-xs text-[var(--text-tertiary)] mb-1">No scenes yet</div>
-              <div className="text-xs text-[var(--text-tertiary)]">Drag to create your first scene</div>
+              <div className="text-xs text-[var(--text-tertiary)] mb-1">No audio yet</div>
+              <div className="text-xs text-[var(--text-tertiary)]">Drag audio files here</div>
             </div>
           </div>
         ) : (
-          scenes.map((s, index) => {
-          const left = msToPx(s.startMs);
-          const width = msToPx(s.endMs - s.startMs);
+          audioClips.map((a, index) => {
+          const left = msToPx(a.startMs);
+          const width = msToPx(a.endMs - a.startMs);
           const isFirstBlock = index === 0;
-          const isLastBlock = index === scenes.length - 1;
-          const isSelected = selectedSceneId === s.id;
-          const colorIndex = index % SCENE_COLORS.length;
-          const colors = SCENE_COLORS[colorIndex];
+          const isLastBlock = index === audioClips.length - 1;
+          const isSelected = selectedAudioId === a.id;
+          const colorIndex = index % AUDIO_COLORS.length;
+          const colors = AUDIO_COLORS[colorIndex];
 
-          // Get asset data for media thumbnail
-          const asset = s.assetId ? getAssetById(s.assetId) : null;
-          const hasMedia = asset && (asset.type === 'image' || asset.type === 'video');
+          // Get asset data for audio info
+          const asset = a.assetId ? getAssetById(a.assetId) : null;
 
           // Magnetic linking detection
-          const prev = index > 0 ? scenes[index - 1] : null;
-          const next = index < scenes.length - 1 ? scenes[index + 1] : null;
+          const prev = index > 0 ? audioClips[index - 1] : null;
+          const next = index < audioClips.length - 1 ? audioClips[index + 1] : null;
           
-          const gapLeftPx  = prev ? ((s.startMs - prev.endMs) * pxPerSec) / 1000 : Infinity;
-          const gapRightPx = next ? ((next.startMs - s.endMs) * pxPerSec) / 1000 : Infinity;
+          const gapLeftPx  = prev ? ((a.startMs - prev.endMs) * pxPerSec) / 1000 : Infinity;
+          const gapRightPx = next ? ((next.startMs - a.endMs) * pxPerSec) / 1000 : Infinity;
 
           const magnetLeft  = gapLeftPx  >= 0 && gapLeftPx  <= SNAP_PX;
           const magnetRight = gapRightPx >= 0 && gapRightPx <= SNAP_PX;
-          const isSnapping = snapAnimationId === s.id;
+          const isSnapping = snapAnimationId === a.id;
 
           return (
             <div
-              key={s.id}
+              key={a.id}
               className={clsx(
-                "timeline-scene absolute top-2 bottom-2 rounded-md overflow-hidden cursor-pointer transition-all duration-200",
+                "timeline-audio absolute top-1 bottom-1 rounded-md overflow-hidden cursor-pointer transition-all duration-200",
                 {
                   "ring-2 ring-white/60 shadow-lg": isSelected,
                   "hover:shadow-md": !isSelected,
@@ -355,61 +362,53 @@ export function SceneBlocks() {
               style={{ 
                 left, 
                 width,
-                backgroundColor: hasMedia ? 'transparent' : colors.bg,
+                backgroundColor: colors.bg,
                 borderColor: isSelected ? "#ffffff" : colors.border,
                 borderWidth: isSelected ? "2px" : "1px",
                 borderStyle: "solid",
-                backgroundImage: hasMedia ? `url(${asset.url})` : undefined,
-                backgroundSize: 'auto 100%',
-                backgroundPosition: 'left center',
-                backgroundRepeat: 'repeat-x'
               }}
-              title={`${s.label} • ${((s.endMs - s.startMs)/1000).toFixed(2)}s`}
+              title={`${asset?.name || a.kind} • ${((a.endMs - a.startMs)/1000).toFixed(2)}s`}
               draggable={false}
-              onClick={(e) => onSceneClick(e, s.id)}
+              onClick={(e) => onAudioClick(e, a.id)}
               onContextMenu={(e) => {
                 e.preventDefault();
                 setContextMenu({
                   x: e.clientX,
                   y: e.clientY,
-                  sceneId: s.id
+                  audioId: a.id
                 });
               }}
-              onPointerDown={(e) => onScenePointerDown(e, s.id)}
+              onPointerDown={(e) => onAudioPointerDown(e, a.id)}
             >
-              {/* Media overlay for better text readability */}
-              {hasMedia && (
-                <div className="absolute inset-0 bg-black/30" />
-              )}
+              {/* Audio overlay for better text readability */}
+              <div className="absolute inset-0 bg-black/20" />
 
               {/* wider, touch-friendly handles with higher z-index */}
               <div
                 className={clsx("absolute left-0 top-0 h-full w-4 cursor-ew-resize bg-white/0 hover:bg-white/10 handle z-20 transition-colors", {
                   "pl-0": isFirstBlock // ensure first block's left handle is fully accessible
                 })}
-                onPointerDown={(e)=>onPointerDown(e, s.id, "left")}
+                onPointerDown={(e)=>onPointerDown(e, a.id, "left")}
               />
               <div
                 className={clsx("absolute right-0 top-0 h-full w-4 cursor-ew-resize bg-white/0 hover:bg-white/10 handle z-20 transition-colors", {
                   "pr-0": isLastBlock // ensure last block's right handle is fully accessible
                 })}
-                onPointerDown={(e)=>onPointerDown(e, s.id, "right")}
+                onPointerDown={(e)=>onPointerDown(e, a.id, "right")}
               />
 
               <div className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-white/90 font-medium select-none drop-shadow-sm z-10">
-                {s.label}
+                {asset?.name || a.kind}
               </div>
 
-              {/* Media type indicator */}
-              {hasMedia && (
-                <div className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-white/80 font-medium select-none drop-shadow-sm z-10">
-                  {asset.type === 'image' ? '📷' : '🎬'}
-                </div>
-              )}
+              {/* Audio type indicator */}
+              <div className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-white/80 font-medium select-none drop-shadow-sm z-10">
+                🎵
+              </div>
 
               {/* Magnetic linking visual indicators */}
-              <span className={clsx("scene-edge left", magnetLeft && "magnet-on", isSnapping && "snap-animation")} />
-              <span className={clsx("scene-edge right", magnetRight && "magnet-on", isSnapping && "snap-animation")} />
+              <span className={clsx("audio-edge left", magnetLeft && "magnet-on", isSnapping && "snap-animation")} />
+              <span className={clsx("audio-edge right", magnetRight && "magnet-on", isSnapping && "snap-animation")} />
             </div>
           );
         })
@@ -423,22 +422,22 @@ export function SceneBlocks() {
           y={contextMenu.y}
           onClose={() => setContextMenu(null)}
           onSplit={() => {
-            selectScene(contextMenu.sceneId);
+            selectAudio(contextMenu.audioId);
             const preciseCutMs = getPreciseCutPosition();
             beginTx("Split at playhead");
             splitAt(preciseCutMs);
             commitTx();
           }}
           onDelete={() => {
-            selectScene(contextMenu.sceneId);
+            selectAudio(contextMenu.audioId);
             deleteSelection({ ripple: false });
           }}
           onRippleDelete={() => {
-            selectScene(contextMenu.sceneId);
+            selectAudio(contextMenu.audioId);
             deleteSelection({ ripple: true });
           }}
           onDuplicate={() => {
-            selectScene(contextMenu.sceneId);
+            selectAudio(contextMenu.audioId);
             duplicateSelection();
           }}
         />,

@@ -95,7 +95,8 @@ export function AssetsPanel() {
       const dur = asset.type === "video" ? 5000 : 3000;
       addSceneFromAsset(asset.id, { durationMs: dur, label: asset.name });
     } else if (asset.type === "audio") {
-      addAudioFromAsset(asset.id, "music", { durationMs: 8000 });
+      // Add audio to audio track with longer default duration
+      addAudioFromAsset(asset.id, "music", { durationMs: 30000 }); // 30s default
     }
     commitTx();
   };

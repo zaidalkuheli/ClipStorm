@@ -2,6 +2,7 @@
 import { create } from "zustand";
 import { nanoid } from "nanoid";
 import { History, HistorySnapshot, makeSnapshot, cloneSnapshot, applySnapshot } from "./history";
+import { useAssetsStore } from "./assetsStore";
 
 // Tuned to feel noticeable but not sticky
 export const SNAP_PX = 8;      // ~8px snaps & links
@@ -77,6 +78,7 @@ export type AudioClip = {
   assetId: string;
   kind: "vo" | "music";
   gain?: number;
+  originalDurationMs: number; // Store the original audio file duration
 };
 export type AspectRatio = "9:16" | "1:1" | "16:9";
 export type Resolution = "1080x1920" | "720x1280";
@@ -125,14 +127,29 @@ interface EditorState {
   triggerSnapAnimation: (id: string) => void;
   updateSceneTransform: (id: string, transform: { x: number; y: number; scale: number }) => void;
 
+  // core editing actions
+  selectedAudioId: string | null;
+  splitAt: (ms: number) => void;
+  deleteSelection: (opts?: { ripple?: boolean }) => void;
+  duplicateSelection: () => void;
+  findSceneAt: (ms: number) => string | null;
+  findAudioAt: (ms: number) => string | null;
+  shiftRightFrom: (ms: number, deltaMs: number) => void;
+
   // helpers
   msPerPx: () => number;
   pxToMs: (px: number) => number;
   msToPx: (ms: number) => number;
   computeInsertMs: () => number;
+  computeAudioInsertMs: () => number;
   normalizeDuration: () => void;
   addSceneFromAsset: (assetId: string, opts?: { atMs?: number; durationMs?: number; label?: string }) => string;
   addAudioFromAsset: (assetId: string, kind: "vo"|"music", opts?: { atMs?: number; durationMs?: number }) => string;
+
+  // audio manipulation actions
+  selectAudio: (id: string | null) => void;
+  moveAudio: (id: string, newStartMs: number, pxPerSec: number) => void;
+  resizeAudioTo: (id: string, edge: "left" | "right", targetMs: number, minMs: number, gridMs: number, pxPerSec: number) => void;
 
   // history actions
   getSnapshot: () => HistorySnapshot;
@@ -147,6 +164,7 @@ interface EditorState {
   // serialization
   getSerializableState: () => {
     scenes: Scene[];
+    audioClips: AudioClip[];
     durationMs: number;
     fps: FrameRate;
     aspect: AspectRatio;
@@ -159,6 +177,7 @@ interface EditorState {
   setZoom: (pxPerSec: number) => void;
   zoomIn: () => void;
   zoomOut: () => void;
+  zoomToPlayhead: () => number;
 
   // playback actions
   play: () => void;
@@ -176,15 +195,14 @@ const initialScenes = [
 
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 
-// Calculate total duration based on scene blocks
-const calculateTotalDuration = (scenes: Scene[]): number => {
-  if (scenes.length === 0) return 20000; // default 20s
-  
-  // Find the maximum end time across all scenes
-  const maxEndMs = Math.max(...scenes.map(s => s.endMs));
+// Calculate total duration based on scene blocks and audio clips
+const calculateTotalDuration = (scenes: Scene[], audioClips?: AudioClip[]): number => {
+  const maxSceneEnd = scenes.length > 0 ? Math.max(...scenes.map(s => s.endMs)) : 0;
+  const maxAudioEnd = audioClips && audioClips.length > 0 ? Math.max(...audioClips.map(a => a.endMs)) : 0;
+  const maxEndMs = Math.max(maxSceneEnd, maxAudioEnd);
   
   // Add some padding (2 seconds) for better UX
-  return maxEndMs + 2000;
+  return maxEndMs > 0 ? maxEndMs + 2000 : 20000; // default 20s if no content
 };
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -206,6 +224,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   
   // audio
   audioClips: [],
+  selectedAudioId: null,
   
   // history
   history: { past: [], future: [], inTx: false, max: 100 },
@@ -217,7 +236,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   toggleGrid: () => set(state => ({ showGrid: !state.showGrid })),
 
   setScenes: (scenes) => {
-    const newDuration = calculateTotalDuration(scenes);
+    const { audioClips } = get();
+    const newDuration = calculateTotalDuration(scenes, audioClips);
     console.log('📏 Updating duration based on scenes:', { 
       sceneCount: scenes.length, 
       maxEndMs: Math.max(...scenes.map(s => s.endMs)),
@@ -226,24 +246,35 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ scenes, durationMs: newDuration });
   },
 
+  setAudioClips: (audioClips) => {
+    const { scenes } = get();
+    const newDuration = calculateTotalDuration(scenes, audioClips);
+    console.log('📏 Updating duration based on audio clips:', { 
+      audioCount: audioClips.length, 
+      maxEndMs: Math.max(...audioClips.map(a => a.endMs)),
+      newDurationMs: newDuration 
+    });
+    set({ audioClips, durationMs: newDuration });
+  },
+
   setDuration: (durationMs) => set({ durationMs }),
 
   addScene: (sceneData) => {
-    const { scenes, durationMs } = get();
+    const { scenes, durationMs, audioClips } = get();
     const newScene: Scene = {
       id: nanoid(),
       ...sceneData
     };
     const updatedScenes = [...scenes, newScene].sort((a, b) => a.startMs - b.startMs);
-    const newDuration = calculateTotalDuration(updatedScenes);
+    const newDuration = calculateTotalDuration(updatedScenes, audioClips);
     console.log('➕ Added new scene:', { newScene, newDurationMs: newDuration });
     set({ scenes: updatedScenes, durationMs: newDuration });
   },
 
   removeScene: (id) => {
-    const { scenes } = get();
+    const { scenes, audioClips } = get();
     const updatedScenes = scenes.filter(s => s.id !== id);
-    const newDuration = calculateTotalDuration(updatedScenes);
+    const newDuration = calculateTotalDuration(updatedScenes, audioClips);
     console.log('➖ Removed scene:', { id, newDurationMs: newDuration });
     set({ scenes: updatedScenes, durationMs: newDuration });
   },
@@ -311,7 +342,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
 
     // Update duration
-    const newDuration = calculateTotalDuration(sortedScenes);
+    const { audioClips } = get();
+    const newDuration = calculateTotalDuration(sortedScenes, audioClips);
     
     console.log('🎬 Moved scene with magnetic linking:', { 
       id, 
@@ -471,9 +503,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ playheadMs: clamp(playheadMs + deltaMs, 0, durationMs) });
   },
 
-  setZoom: (pxPerSec) => set({ pxPerSec: clamp(pxPerSec, 20, 500) }),
-  zoomIn: () => set(state => ({ pxPerSec: clamp(state.pxPerSec * 1.2, 20, 500) })),
-  zoomOut: () => set(state => ({ pxPerSec: clamp(state.pxPerSec / 1.2, 20, 500) })),
+  setZoom: (pxPerSec) => set({ pxPerSec: clamp(pxPerSec, 5, 1000) }),
+  zoomIn: () => set(state => ({ pxPerSec: clamp(state.pxPerSec * 1.2, 5, 1000) })),
+  zoomOut: () => set(state => ({ pxPerSec: clamp(state.pxPerSec / 1.2, 5, 1000) })),
+  zoomToPlayhead: () => {
+    const { playheadMs, pxPerSec } = get();
+    // Calculate the playhead position in pixels
+    const playheadPx = (playheadMs / 1000) * pxPerSec;
+    // Return the pixel position for the component to handle scrolling
+    return playheadPx;
+  },
 
   // playback actions
   play: () => set({ isPlaying: true }),
@@ -483,10 +522,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   // history actions
   getSnapshot: (): HistorySnapshot => {
-    const { scenes, durationMs, playheadMs } = get();
-    // ensure scenes are sorted & normalized
-    const sorted = [...scenes].sort((a,b)=>a.startMs-b.startMs).map(s=>({ ...s }));
-    return makeSnapshot({ scenes: sorted, durationMs, playheadMs });
+    const { scenes, audioClips, durationMs, playheadMs } = get();
+    // ensure scenes and audio clips are sorted & normalized
+    const sortedScenes = [...scenes].sort((a,b)=>a.startMs-b.startMs).map(s=>({ ...s }));
+    const sortedAudioClips = [...audioClips].sort((a,b)=>a.startMs-b.startMs).map(a=>({ ...a }));
+    return makeSnapshot({ scenes: sortedScenes, audioClips: sortedAudioClips, durationMs, playheadMs });
   },
 
   beginTx: () => {
@@ -524,6 +564,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     applySnapshot(
       { 
         setScenes: (scenes)=> set({ scenes }),
+        setAudioClips: (audioClips)=> set({ audioClips }),
         setDuration: (ms)=> set({ durationMs: ms }),
         setPlayhead: (ms)=> set({ playheadMs: ms }) 
       },
@@ -541,6 +582,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     applySnapshot(
       { 
         setScenes: (scenes)=> set({ scenes }),
+        setAudioClips: (audioClips)=> set({ audioClips }),
         setDuration: (ms)=> set({ durationMs: ms }),
         setPlayhead: (ms)=> set({ playheadMs: ms }) 
       },
@@ -560,6 +602,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     applySnapshot(
       { 
         setScenes: (scenes)=> set({ scenes }),
+        setAudioClips: (audioClips)=> set({ audioClips }),
         setDuration: (ms)=> set({ durationMs: ms }),
         setPlayhead: (ms)=> set({ playheadMs: ms }) 
       },
@@ -575,9 +618,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   // serialization
   getSerializableState: () => {
-    const { scenes, durationMs, fps, aspect, resolution } = get();
+    const { scenes, audioClips, durationMs, fps, aspect, resolution } = get();
     return {
       scenes: [...scenes].sort((a, b) => a.startMs - b.startMs),
+      audioClips: [...audioClips].sort((a, b) => a.startMs - b.startMs),
       durationMs,
       fps,
       aspect,
@@ -592,14 +636,27 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   computeInsertMs: () => {
     const { playheadMs, scenes } = get();
-    const end = scenes.length ? Math.max(...scenes.map(s => s.endMs)) : 0;
-    // Always insert at the end of the last block, not at playhead
-    return end;
+    const maxSceneEnd = scenes.length ? Math.max(...scenes.map(s => s.endMs)) : 0;
+    // For video/image media, only consider scenes, not audio clips
+    // If no scenes exist, start at timeline beginning (0ms)
+    // Otherwise, insert at the end of the last scene
+    return maxSceneEnd;
+  },
+
+  computeAudioInsertMs: () => {
+    const { playheadMs, audioClips } = get();
+    const maxAudioEnd = audioClips.length ? Math.max(...audioClips.map(a => a.endMs)) : 0;
+    // For audio media, only consider audio clips, not scenes
+    // If no audio clips exist, start at timeline beginning (0ms)
+    // Otherwise, insert at the end of the last audio clip
+    return maxAudioEnd;
   },
 
   normalizeDuration: () => {
-    const { scenes } = get();
-    const end = scenes.length ? Math.max(...scenes.map(s => s.endMs)) : 0;
+    const { scenes, audioClips } = get();
+    const maxSceneEnd = scenes.length > 0 ? Math.max(...scenes.map(s => s.endMs)) : 0;
+    const maxAudioEnd = audioClips.length > 0 ? Math.max(...audioClips.map(a => a.endMs)) : 0;
+    const end = Math.max(maxSceneEnd, maxAudioEnd);
     set({ durationMs: Math.max(end, 1000) });
   },
 
@@ -618,13 +675,443 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   addAudioFromAsset: (assetId, kind, opts) => {
-    const at = typeof opts?.atMs === "number" ? Math.max(0, opts.atMs) : get().computeInsertMs();
-    const dflt = opts?.durationMs ?? 8000; // 8s default
+    const at = typeof opts?.atMs === "number" ? Math.max(0, opts.atMs) : get().computeAudioInsertMs();
+    const dflt = opts?.durationMs ?? 30000; // 30s default, will be updated with actual duration
     const id = crypto.randomUUID();
-    const clip = { id, startMs: at, endMs: at + dflt, assetId, kind };
+    const clip = { id, startMs: at, endMs: at + dflt, assetId, kind, originalDurationMs: dflt };
     set({ audioClips: [...get().audioClips, clip].sort((a,b)=>a.startMs-b.startMs) });
     get().normalizeDuration();
     set(state => ({ history: { ...state.history, future: [] }}));
+    
+    // Try to get actual audio duration and update the clip
+    const asset = useAssetsStore.getState().getById(assetId);
+    if (asset && asset.url) {
+      const audio = new Audio(asset.url);
+      audio.addEventListener('loadedmetadata', () => {
+        const actualDurationMs = audio.duration * 1000;
+        if (actualDurationMs > 0 && actualDurationMs !== Infinity) {
+          console.log('🎵 Loading actual audio duration:', { assetId, actualDurationMs });
+          set(state => ({
+            audioClips: state.audioClips.map(c => 
+              c.id === id ? { ...c, endMs: c.startMs + actualDurationMs, originalDurationMs: actualDurationMs } : c
+            )
+          }));
+          get().normalizeDuration();
+        }
+      });
+      audio.addEventListener('error', (e) => {
+        console.warn('🎵 Failed to load audio metadata:', e);
+      });
+      // Load the audio to trigger metadata loading
+      audio.load();
+    }
+    
     return id;
+  },
+
+  // Core editing actions
+  findSceneAt: (ms) => {
+    const { selectedSceneId, scenes } = get();
+    // If a scene is selected and playhead is inside it, use that
+    if (selectedSceneId) {
+      const selected = scenes.find(s => s.id === selectedSceneId);
+      if (selected && ms >= selected.startMs && ms < selected.endMs) {
+        return selectedSceneId;
+      }
+    }
+    // Otherwise find first scene at that time
+    const scene = scenes.find(s => ms >= s.startMs && ms < s.endMs);
+    return scene?.id || null;
+  },
+
+  findAudioAt: (ms) => {
+    const { selectedAudioId, audioClips } = get();
+    // If audio is selected and playhead is inside it, use that
+    if (selectedAudioId) {
+      const selected = audioClips.find(a => a.id === selectedAudioId);
+      if (selected && ms >= selected.startMs && ms < selected.endMs) {
+        return selectedAudioId;
+      }
+    }
+    // Otherwise find first audio at that time
+    const audio = audioClips.find(a => ms >= a.startMs && ms < a.endMs);
+    return audio?.id || null;
+  },
+
+  splitAt: (ms) => {
+    const { selectedSceneId, selectedAudioId, scenes, audioClips, fps } = get();
+    
+    // Calculate precise grid snapping for frame-accurate cuts
+    const frameMs = 1000 / fps; // milliseconds per frame
+    const snappedMs = snapToGrid(ms, frameMs);
+    
+    // Try to split selected scene first
+    if (selectedSceneId) {
+      const scene = scenes.find(s => s.id === selectedSceneId);
+      if (scene && snappedMs > scene.startMs && snappedMs < scene.endMs) {
+        get().beginTx("Split scene at playhead");
+        
+        const sceneA = {
+          ...scene,
+          id: nanoid(),
+          endMs: snappedMs,
+          linkRightId: null
+        };
+        
+        const sceneB = {
+          ...scene,
+          id: nanoid(),
+          startMs: snappedMs,
+          linkLeftId: null
+        };
+        
+        // Link A and B together
+        sceneA.linkRightId = sceneB.id;
+        sceneB.linkLeftId = sceneA.id;
+        
+        // Replace original with A and B
+        const newScenes = scenes.filter(s => s.id !== selectedSceneId);
+        newScenes.push(sceneA, sceneB);
+        newScenes.sort((a, b) => a.startMs - b.startMs);
+        
+        set({ scenes: newScenes });
+        get().normalizeDuration();
+        get().commitTx();
+        return;
+      }
+    }
+    
+    // Try to split selected audio
+    if (selectedAudioId) {
+      const audio = audioClips.find(a => a.id === selectedAudioId);
+      if (audio && snappedMs > audio.startMs && snappedMs < audio.endMs) {
+        get().beginTx("Split audio at playhead");
+        
+        const audioA = {
+          ...audio,
+          id: nanoid(),
+          endMs: snappedMs
+        };
+        
+        const audioB = {
+          ...audio,
+          id: nanoid(),
+          startMs: snappedMs
+        };
+        
+        const newAudioClips = audioClips.filter(a => a.id !== selectedAudioId);
+        newAudioClips.push(audioA, audioB);
+        newAudioClips.sort((a, b) => a.startMs - b.startMs);
+        
+        set({ audioClips: newAudioClips });
+        get().normalizeDuration();
+        get().commitTx();
+        return;
+      }
+    }
+    
+    // Try to find any scene at playhead
+    const sceneId = get().findSceneAt(snappedMs);
+    if (sceneId) {
+      set({ selectedSceneId: sceneId });
+      get().splitAt(snappedMs);
+      return;
+    }
+    
+    // Try to find any audio at playhead
+    const audioId = get().findAudioAt(snappedMs);
+    if (audioId) {
+      set({ selectedAudioId: audioId });
+      get().splitAt(snappedMs);
+      return;
+    }
+  },
+
+  shiftRightFrom: (ms, deltaMs) => {
+    const { scenes, audioClips } = get();
+    
+    // Shift scenes
+    const newScenes = scenes.map(scene => {
+      if (scene.startMs >= ms) {
+        return { ...scene, startMs: Math.max(0, scene.startMs + deltaMs), endMs: Math.max(0, scene.endMs + deltaMs) };
+      }
+      return scene;
+    });
+    
+    // Shift audio clips
+    const newAudioClips = audioClips.map(audio => {
+      if (audio.startMs >= ms) {
+        return { ...audio, startMs: Math.max(0, audio.startMs + deltaMs), endMs: Math.max(0, audio.endMs + deltaMs) };
+      }
+      return audio;
+    });
+    
+    set({ scenes: newScenes, audioClips: newAudioClips });
+  },
+
+  deleteSelection: (opts = {}) => {
+    const { ripple = false } = opts;
+    const { selectedSceneId, selectedAudioId, scenes, audioClips } = get();
+    
+    if (selectedSceneId) {
+      get().beginTx(ripple ? "Ripple delete scene" : "Delete scene");
+      
+      const scene = scenes.find(s => s.id === selectedSceneId);
+      if (!scene) return;
+      
+      const gapMs = scene.endMs - scene.startMs;
+      
+      // Remove the scene
+      const newScenes = scenes.filter(s => s.id !== selectedSceneId);
+      
+      // Clear links pointing to this scene
+      newScenes.forEach(s => {
+        if (s.linkLeftId === selectedSceneId) s.linkLeftId = null;
+        if (s.linkRightId === selectedSceneId) s.linkRightId = null;
+      });
+      
+      if (ripple) {
+        // Close the gap by shifting everything after to the left
+        get().shiftRightFrom(scene.endMs, -gapMs);
+      }
+      
+      // Select next scene or previous, or clear selection
+      const remainingScenes = ripple ? get().scenes : newScenes;
+      const nextScene = remainingScenes.find(s => s.startMs >= scene.startMs);
+      const prevScene = remainingScenes.find(s => s.endMs <= scene.startMs);
+      
+      set({ 
+        scenes: ripple ? get().scenes : newScenes,
+        selectedSceneId: nextScene?.id || prevScene?.id || null
+      });
+      
+      get().normalizeDuration();
+      get().commitTx();
+    } else if (selectedAudioId) {
+      get().beginTx(ripple ? "Ripple delete audio" : "Delete audio");
+      
+      const audio = audioClips.find(a => a.id === selectedAudioId);
+      if (!audio) return;
+      
+      const gapMs = audio.endMs - audio.startMs;
+      
+      // Remove the audio
+      const newAudioClips = audioClips.filter(a => a.id !== selectedAudioId);
+      
+      if (ripple) {
+        // Close the gap by shifting everything after to the left
+        get().shiftRightFrom(audio.endMs, -gapMs);
+      }
+      
+      // Select next audio or previous, or clear selection
+      const remainingAudio = ripple ? get().audioClips : newAudioClips;
+      const nextAudio = remainingAudio.find(a => a.startMs >= audio.startMs);
+      const prevAudio = remainingAudio.find(a => a.endMs <= audio.startMs);
+      
+      set({ 
+        audioClips: ripple ? get().audioClips : newAudioClips,
+        selectedAudioId: nextAudio?.id || prevAudio?.id || null
+      });
+      
+      get().normalizeDuration();
+      get().commitTx();
+    }
+  },
+
+  duplicateSelection: () => {
+    const { selectedSceneId, selectedAudioId, scenes, audioClips } = get();
+    
+    if (selectedSceneId) {
+      get().beginTx("Duplicate scene");
+      
+      const scene = scenes.find(s => s.id === selectedSceneId);
+      if (!scene) return;
+      
+      const duration = scene.endMs - scene.startMs;
+      const newStartMs = scene.endMs;
+      
+      const duplicatedScene = {
+        ...scene,
+        id: nanoid(),
+        startMs: newStartMs,
+        endMs: newStartMs + duration,
+        linkLeftId: null,
+        linkRightId: null
+      };
+      
+      const newScenes = [...scenes, duplicatedScene].sort((a, b) => a.startMs - b.startMs);
+      set({ scenes: newScenes, selectedSceneId: duplicatedScene.id });
+      get().normalizeDuration();
+      get().commitTx();
+    } else if (selectedAudioId) {
+      get().beginTx("Duplicate audio");
+      
+      const audio = audioClips.find(a => a.id === selectedAudioId);
+      if (!audio) return;
+      
+      const duration = audio.endMs - audio.startMs;
+      const newStartMs = audio.endMs;
+      
+      const duplicatedAudio = {
+        ...audio,
+        id: nanoid(),
+        startMs: newStartMs,
+        endMs: newStartMs + duration
+      };
+      
+      const newAudioClips = [...audioClips, duplicatedAudio].sort((a, b) => a.startMs - b.startMs);
+      set({ audioClips: newAudioClips, selectedAudioId: duplicatedAudio.id });
+      get().normalizeDuration();
+      get().commitTx();
+    }
+  },
+
+  // Audio manipulation actions
+  selectAudio: (id) => set({ selectedAudioId: id }),
+
+  moveAudio: (id, newStartMs, pxPerSec) => {
+    const { audioClips, durationMs, triggerSnapAnimation } = get();
+    const audioIndex = audioClips.findIndex(a => a.id === id);
+    if (audioIndex < 0) return;
+
+    const audio = audioClips[audioIndex];
+    const audioDuration = audio.endMs - audio.startMs;
+    const newEndMs = newStartMs + audioDuration;
+    const adjustedStartMs = Math.max(0, newEndMs - audioDuration);
+
+    // Create updated audio
+    const updatedAudio = {
+      ...audio,
+      startMs: adjustedStartMs,
+      endMs: newEndMs
+    };
+
+    // Update audio array
+    const updatedAudioClips = [...audioClips];
+    updatedAudioClips[audioIndex] = updatedAudio;
+
+    // Sort audio by start time
+    updatedAudioClips.sort((a, b) => a.startMs - b.startMs);
+
+    // Apply magnetic linking after move
+    const movedIndex = updatedAudioClips.findIndex(a => a.id === id);
+    const movedAudio = updatedAudioClips[movedIndex];
+    const prevAudio = movedIndex > 0 ? updatedAudioClips[movedIndex - 1] : null;
+    const nextAudio = movedIndex < updatedAudioClips.length - 1 ? updatedAudioClips[movedIndex + 1] : null;
+
+    const snapMs = pxToMs(SNAP_PX, pxPerSec);
+    const unlinkMs = pxToMs(UNLINK_PX, pxPerSec);
+
+    // Check left edge magnetic linking
+    if (prevAudio) {
+      const gap = movedAudio.startMs - prevAudio.endMs;
+      if (gap >= 0 && gap <= snapMs) {
+        // Snap & link to previous audio
+        movedAudio.startMs = prevAudio.endMs;
+        movedAudio.endMs = movedAudio.startMs + audioDuration;
+        if (triggerSnapAnimation) {
+          triggerSnapAnimation(movedAudio.id);
+          triggerSnapAnimation(prevAudio.id);
+        }
+      }
+    }
+
+    // Check right edge magnetic linking
+    if (nextAudio) {
+      const gap = nextAudio.startMs - movedAudio.endMs;
+      if (gap >= 0 && gap <= snapMs) {
+        // Snap & link to next audio
+        movedAudio.endMs = nextAudio.startMs;
+        movedAudio.startMs = movedAudio.endMs - audioDuration;
+        if (triggerSnapAnimation) {
+          triggerSnapAnimation(movedAudio.id);
+          triggerSnapAnimation(nextAudio.id);
+        }
+      }
+    }
+
+    // Update duration
+    const { scenes } = get();
+    const newDuration = calculateTotalDuration(scenes, updatedAudioClips);
+    
+    console.log('🎵 Moved audio with magnetic linking:', { 
+      id, 
+      from: audio.startMs, 
+      to: movedAudio.startMs,
+      duration: audioDuration,
+      newDurationMs: newDuration
+    });
+
+    set({ audioClips: updatedAudioClips, durationMs: newDuration });
+  },
+
+  resizeAudioTo: (id: string, edge: "left" | "right", targetMs: number, minMs: number, gridMs: number, pxPerSec: number) => {
+    const { audioClips: a, durationMs, triggerSnapAnimation } = get();
+    const audioClips = [...a]; // Don't sort here, assume already sorted
+
+    const i = audioClips.findIndex(ac => ac.id === id);
+    if (i < 0) return;
+
+    const cur = audioClips[i];
+    const prev = audioClips[i-1];
+    const next = audioClips[i+1];
+
+    // Use the stored original duration to constrain resizing
+    const maxDurationMs = cur.originalDurationMs || Infinity;
+
+    const snapMs = pxToMs(SNAP_PX, pxPerSec);
+    const unlinkMs = pxToMs(UNLINK_PX, pxPerSec);
+
+    if (edge === "left") {
+      const low  = prev ? (prev.startMs + minMs) : 0;
+      const high = cur.endMs - minMs;
+      // Don't exceed original audio duration - use original duration, not current
+      const maxStartMs = cur.endMs - maxDurationMs;
+
+      // snap, then clamp
+      let newStart = snapToGrid(targetMs, gridMs);
+      newStart = bounds(newStart, Math.max(low, maxStartMs), high);
+
+      cur.startMs = newStart;
+
+      // magnet: if close enough to prev.end => snap + link
+      if (prev) {
+        const gap = cur.startMs - prev.endMs; // >= 0 if separated
+        if (gap >= 0 && gap <= snapMs) {
+          // snap & link
+          cur.startMs = prev.endMs;
+          if (triggerSnapAnimation) {
+            triggerSnapAnimation(cur.id);
+            triggerSnapAnimation(prev.id);
+          }
+        }
+      }
+    } else {
+      // RIGHT EDGE
+      const low  = cur.startMs + minMs;
+      const high = next ? (next.endMs - minMs) : Number.MAX_SAFE_INTEGER;
+      // Don't exceed original audio duration - use original duration, not current
+      const maxEndMs = cur.startMs + maxDurationMs;
+
+      let newEnd = snapToGrid(targetMs, gridMs);
+      newEnd = bounds(newEnd, low, Math.min(high, maxEndMs));
+
+      cur.endMs = newEnd;
+
+      // magnet: close to next.start => snap + link
+      if (next) {
+        const gap = next.startMs - cur.endMs; // >= 0 if separated
+        if (gap >= 0 && gap <= snapMs) {
+          cur.endMs = next.startMs;
+          if (triggerSnapAnimation) {
+            triggerSnapAnimation(cur.id);
+            triggerSnapAnimation(next.id);
+          }
+        }
+      }
+    }
+
+    set({ audioClips });
+    get().normalizeDuration(); // Extend timeline if needed
   },
 }));
