@@ -8,6 +8,8 @@ interface TrackHeaderProps {
     id: string;
     name: string;
     type: "video" | "audio";
+    muted?: boolean;
+    soloed?: boolean;
   };
   height: number;
   onAddTrack: (type: "video" | "audio") => void;
@@ -22,6 +24,8 @@ export function TrackHeader({ track, height, onAddTrack, onRemoveTrack, onDragSt
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(track.name);
   const renameTrack = useEditorStore(s => s.renameTrack);
+  const toggleTrackMute = useEditorStore(s => s.toggleTrackMute);
+  const toggleTrackSolo = useEditorStore(s => s.toggleTrackSolo);
   const scenes = useEditorStore(s => s.scenes);
   const audioClips = useEditorStore(s => s.audioClips);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -85,22 +89,12 @@ export function TrackHeader({ track, height, onAddTrack, onRemoveTrack, onDragSt
 
   return (
     <div 
-      className="flex items-center justify-between px-2 py-1 bg-[var(--surface-secondary)] border-b border-[var(--border-primary)] group"
+      className="flex items-center justify-between px-1 py-1 bg-[var(--surface-secondary)] border-b border-[var(--border-primary)] group w-28 hover:bg-[var(--surface-primary)]/50 transition-colors duration-200"
       style={{ height }}
       onDragOver={(e) => onDragOverTrack?.(track.id, e)}
       onDrop={(e) => onDropTrack?.(track.id, e)}
     >
-      <div className="flex items-center gap-2 flex-1">
-        {/* Drag handle */}
-        <button
-          draggable
-          onDragStart={() => onDragStartTrack?.(track.id)}
-          className="px-1.5 py-1 h-6 w-6 flex items-center justify-center text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-primary)]/60 rounded-md cursor-grab active:cursor-grabbing transition-all duration-150 hover:scale-105"
-          title="Drag to reorder track"
-          aria-label="Reorder track"
-        >
-          <GripVertical size={14} />
-        </button>
+       <div className="flex items-center gap-2 flex-1">
         {isEditing ? (
           <div className="flex items-center gap-1 flex-1 min-w-0">
             <input
@@ -137,33 +131,73 @@ export function TrackHeader({ track, height, onAddTrack, onRemoveTrack, onDragSt
             </div>
           </div>
         ) : (
-          <>
-            <button
-              onClick={handleDelete}
-              className="p-0.5 text-red-500 hover:text-red-400 hover:bg-red-500/20 rounded transition-colors"
-              title={hasContent ? "Delete track (with content)" : "Delete track"}
-            >
-              <Trash2 size={10} />
-            </button>
-            <span className="text-xs text-[var(--text-secondary)] font-medium truncate">
-              {track.name}
-            </span>
-            <button
-              onClick={() => setIsEditing(true)}
-              className="p-0.5 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-primary)] rounded opacity-0 group-hover:opacity-100 transition-opacity"
-              title="Rename track"
-            >
-              <Edit2 size={10} />
-            </button>
-          </>
+           <div className="flex flex-col gap-1 flex-1 min-w-0">
+             {/* First row: Type icon and track name */}
+             <div className="flex items-center gap-1 w-full">
+               <div className="text-xs text-[var(--text-tertiary)]">
+                 {track.type === "video" ? "🎬" : "🎵"}
+               </div>
+               <span 
+                 className="text-xs text-[var(--text-secondary)] font-medium cursor-pointer hover:text-[var(--text-primary)] break-words flex-1 transition-colors duration-150"
+                 onDoubleClick={() => setIsEditing(true)}
+                 title="Double-click to rename"
+               >
+                 {track.name}
+               </span>
+             </div>
+             
+             {/* Second row: All controls - left to right flow */}
+             <div className="flex items-center gap-1 w-full">
+               <button
+                 draggable
+                 onDragStart={() => onDragStartTrack?.(track.id)}
+                 className="px-1.5 py-1 h-6 w-6 flex items-center justify-center text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-primary)]/60 rounded-md cursor-grab active:cursor-grabbing transition-all duration-200 hover:scale-105 hover:shadow-sm"
+                 title="Drag to reorder track"
+                 aria-label="Reorder track"
+               >
+                 <GripVertical size={14} />
+               </button>
+               
+               <button
+                 onClick={handleDelete}
+                 className="p-0.5 text-red-500 hover:text-red-400 hover:bg-red-500/20 rounded transition-all duration-200 hover:scale-105"
+                 title={hasContent ? "Delete track (with content)" : "Delete track"}
+               >
+                 <Trash2 size={10} />
+               </button>
+               
+               {/* Mute/Solo buttons - only show for audio tracks */}
+               {track.type === "audio" && (
+                 <>
+                   <button
+                     onClick={() => toggleTrackMute(track.id)}
+                     className={`px-2 py-1 text-[12px] font-bold rounded-md transition-all duration-200 hover:scale-105 ${
+                       track.muted 
+                         ? 'bg-red-500 text-white shadow-md border-2 border-red-400 hover:bg-red-600' 
+                         : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-primary)] border border-transparent hover:shadow-sm'
+                     }`}
+                     title={track.muted ? "Unmute track" : "Mute track"}
+                   >
+                     M
+                   </button>
+                   <button
+                     onClick={() => toggleTrackSolo(track.id)}
+                     className={`px-2 py-1 text-[12px] font-bold rounded-md transition-all duration-200 hover:scale-105 ${
+                       track.soloed 
+                         ? 'bg-blue-500 text-white shadow-md border-2 border-blue-400 hover:bg-blue-600' 
+                         : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-primary)] border border-transparent hover:shadow-sm'
+                     }`}
+                     title={track.soloed ? "Unsolo track" : "Solo track"}
+                   >
+                     S
+                   </button>
+                 </>
+               )}
+             </div>
+           </div>
         )}
       </div>
       
-      <div className="flex items-center gap-1">
-        <div className="text-xs text-[var(--text-tertiary)]">
-          {track.type === "video" ? "🎬" : "🎵"}
-        </div>
-      </div>
     </div>
   );
 }

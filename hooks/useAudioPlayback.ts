@@ -7,15 +7,44 @@ export function useAudioPlayback() {
   const isPlaying = useEditorStore(s => s.isPlaying);
   const playheadMs = useEditorStore(s => s.playheadMs);
   const audioClips = useEditorStore(s => s.audioClips);
+  const tracks = useEditorStore(s => s.tracks);
   const getAssetById = useAssetsStore(s => s.getById);
   
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
 
   // Get current audio clips that should be playing
   const getCurrentAudioClips = () => {
-    return audioClips.filter(clip => 
+    const clipsAtPlayhead = audioClips.filter(clip => 
       playheadMs >= clip.startMs && playheadMs < clip.endMs
     );
+
+    // Check if any track is soloed
+    const soloedTracks = tracks.filter(track => track.soloed);
+    const hasSoloedTrack = soloedTracks.length > 0;
+
+    if (hasSoloedTrack) {
+      // Only play clips from soloed tracks
+      const soloedTrackIds = soloedTracks.map(track => track.id);
+      const filteredClips = clipsAtPlayhead.filter(clip => 
+        clip.trackId && soloedTrackIds.includes(clip.trackId)
+      );
+      console.log('🎵 Solo mode active:', { soloedTracks: soloedTracks.map(t => t.name), playingClips: filteredClips.length });
+      return filteredClips;
+    }
+
+    // Filter out clips from muted tracks
+    const filteredClips = clipsAtPlayhead.filter(clip => {
+      if (!clip.trackId) return true; // Clips without trackId should play
+      const track = tracks.find(t => t.id === clip.trackId);
+      return !track?.muted; // Don't play if track is muted
+    });
+    
+    const mutedTracks = tracks.filter(track => track.muted);
+    if (mutedTracks.length > 0) {
+      console.log('🔇 Muted tracks:', mutedTracks.map(t => t.name), 'Playing clips:', filteredClips.length);
+    }
+    
+    return filteredClips;
   };
 
   // Create or get audio element for a clip
@@ -92,7 +121,7 @@ export function useAudioPlayback() {
         audio.pause();
       }
     });
-  }, [isPlaying, playheadMs, audioClips]);
+  }, [isPlaying, playheadMs, audioClips, tracks]);
 
   // Cleanup audio elements when clips are removed
   useEffect(() => {

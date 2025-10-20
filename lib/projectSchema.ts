@@ -23,6 +23,8 @@ const TrackSchema = z.object({
   id: z.string(),
   name: z.string(),
   type: z.enum(["video", "audio"]),
+  muted: z.boolean().optional(),
+  soloed: z.boolean().optional(),
 });
 
 // Audio clip schema

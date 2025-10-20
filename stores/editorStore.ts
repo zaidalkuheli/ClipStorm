@@ -58,6 +58,8 @@ export type Track = {
   id: string;
   name: string;
   type: "video" | "audio";
+  muted?: boolean;
+  soloed?: boolean;
 };
 
 export type Scene = { 
@@ -132,6 +134,8 @@ interface EditorState {
   addTrack: (track: Omit<Track, 'id'>) => void;
   removeTrack: (id: string) => void;
   renameTrack: (id: string, name: string) => void;
+  toggleTrackMute: (id: string) => void;
+  toggleTrackSolo: (id: string) => void;
   setScenes: (scenes: Scene[]) => void;
   setAudioClips: (audioClips: AudioClip[]) => void;
   setDuration: (durationMs: number) => void;
@@ -298,6 +302,41 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         track.id === id ? { ...track, name } : track
       )
     }));
+  },
+
+  toggleTrackMute: (id) => {
+    set(state => {
+      const updatedTracks = state.tracks.map(track => {
+        if (track.id === id) {
+          // Toggle mute on the clicked track
+          return { ...track, muted: !track.muted, soloed: false }; // Clear solo when muting
+        }
+        return track;
+      });
+      const mutedTrack = updatedTracks.find(t => t.id === id);
+      console.log('🔇 Track mute toggled:', { trackId: id, trackName: mutedTrack?.name, muted: mutedTrack?.muted });
+      return { tracks: updatedTracks };
+    });
+  },
+
+  toggleTrackSolo: (id) => {
+    set(state => {
+      const tracks = state.tracks.map(track => {
+        if (track.id === id) {
+          // Toggle solo on the clicked track
+          return { ...track, soloed: !track.soloed, muted: false }; // Clear mute when soloing
+        } else if (track.soloed) {
+          // If any other track is soloed, unsolo it
+          return { ...track, soloed: false };
+        }
+        return track;
+      });
+      
+      const soloedTrack = tracks.find(t => t.soloed);
+      console.log('🎵 Track solo toggled:', { trackId: id, soloedTrack: soloedTrack?.name, soloed: soloedTrack?.soloed });
+      
+      return { tracks };
+    });
   },
 
   setScenes: (scenes) => {

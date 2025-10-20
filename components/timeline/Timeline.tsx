@@ -368,7 +368,7 @@ export function Timeline() {
         <div className="relative flex-1 overflow-hidden">
           <div className="flex h-full">
             {/* Left labels column - fixed position, NOT scrollable */}
-            <div className="flex-shrink-0 w-40 bg-[var(--surface-primary)] border-r border-[var(--border-primary)] select-none">
+            <div className="flex-shrink-0 w-28 bg-[var(--surface-primary)] border-r border-[var(--border-primary)] select-none">
               {/* Timeline label with add track button */}
               <div className="h-8 flex items-center justify-between px-2 text-[11px] text-[var(--text-secondary)] font-medium select-none">
                 <span className="text-[12px] font-semibold">Timeline</span>
@@ -405,7 +405,7 @@ export function Timeline() {
                 <TrackHeader 
                   key={track.id} 
                   track={track} 
-                  height={track.type === "video" ? 64 : 48}
+                  height={track.type === "video" ? 64 : 56}
                   onAddTrack={handleAddTrack}
                   onRemoveTrack={handleRemoveTrack}
                   onDragStartTrack={onDragStartTrack}
@@ -427,7 +427,7 @@ export function Timeline() {
                     <Track 
                       key={track.id} 
                       track={track} 
-                      height={track.type === "video" ? 64 : 48}
+                      height={track.type === "video" ? 64 : 56}
                     />
                   ))}
                 </div>
