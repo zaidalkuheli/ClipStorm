@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { useProjectStore } from "./projectStore";
 import { useEditorStore } from "./editorStore";
 import { computeWaveform, type WaveformData } from "@/lib/computePeaks";
+import { fileStorage } from "@/lib/fileStorage";
 
 interface MediaAsset {
   id: string;
@@ -12,6 +13,7 @@ interface MediaAsset {
   thumbnail?: string;
   addedAt: Date;
   file?: File; // Store the actual file for saving
+  isMissing?: boolean; // Flag for missing files
 }
 
 interface AssetsState {
@@ -34,9 +36,22 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
   assets: [],
   waveforms: {},
 
-  addAsset: (asset: MediaAsset) => {
+  addAsset: async (asset: MediaAsset) => {
     console.log("🔍 AssetsStore - Adding asset:", asset);
     console.log("🔍 AssetsStore - Current assets before add:", get().assets.length);
+    
+    // Store file in IndexedDB if it exists
+    if (asset.file) {
+      try {
+        console.log("💾 Storing file in IndexedDB:", asset.name);
+        await fileStorage.storeFile(asset.id, asset.file);
+        console.log("✅ File stored successfully:", asset.name);
+      } catch (error) {
+        console.error("❌ Failed to store file:", error);
+        throw error;
+      }
+    }
+    
     set(state => ({
       assets: [...state.assets, asset]
     }));
@@ -53,7 +68,15 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
     }
   },
 
-  removeAsset: (id: string) => {
+  removeAsset: async (id: string) => {
+    // Remove file from IndexedDB
+    try {
+      await fileStorage.deleteFile(id);
+      console.log("🗑️ File removed from IndexedDB:", id);
+    } catch (error) {
+      console.error("❌ Failed to remove file from IndexedDB:", error);
+    }
+    
     set(state => ({
       assets: state.assets.filter(asset => asset.id !== id)
     }));
@@ -76,35 +99,93 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
     useProjectStore.getState().markDirty();
   },
 
-  clearAssets: () => {
+  clearAssets: async () => {
     console.log("🔍 AssetsStore - Clearing assets (current count:", get().assets.length, ")");
+    
+    // Clear all files from IndexedDB
+    try {
+      await fileStorage.clearAllFiles();
+      console.log("🗑️ All files cleared from IndexedDB");
+    } catch (error) {
+      console.error("❌ Failed to clear files from IndexedDB:", error);
+    }
+    
     set({ assets: [] });
     useProjectStore.getState().markDirty();
   },
 
-  loadAssetsFromProject: (projectAssets: any[]) => {
+  loadAssetsFromProject: async (projectAssets: any[]) => {
     console.log("🔍 AssetsStore - Loading assets from project:", projectAssets.length);
     console.log("🔍 AssetsStore - Project assets data:", projectAssets);
     
-    const loadedAssets: MediaAsset[] = projectAssets.map(asset => {
-      console.log(`🔍 Loading asset from project:`, {
-        id: asset.id,
-        name: asset.name,
-        kind: asset.kind,
-        uri: asset.uri ? asset.uri.substring(0, 50) + '...' : 'NO URI'
-      });
+    const loadedAssets: MediaAsset[] = [];
+    
+    for (const projectAsset of projectAssets) {
+      console.log(`🔍 Loading asset from project: ${projectAsset.name}`, projectAsset);
       
-      return {
-        id: asset.id,
-        name: asset.name,
-        type: asset.kind === 'image' ? 'image' : 
-              asset.kind === 'music' || asset.kind === 'vo' ? 'audio' : 'video',
-        url: asset.uri || '', // Use the URI from the project (should be base64 data URL)
-        thumbnail: asset.kind === 'image' ? asset.uri : undefined,
+      // Try to load the file from IndexedDB first
+      let file: File | null = null;
+      let isFileMissing = false;
+      try {
+        file = await fileStorage.getFile(projectAsset.id);
+        if (file) {
+          console.log(`✅ Loaded file from IndexedDB: ${projectAsset.name}`);
+        } else {
+          console.log(`⚠️ File not found in IndexedDB: ${projectAsset.name}`);
+          isFileMissing = true;
+        }
+      } catch (error) {
+        console.error(`❌ Failed to load file from IndexedDB: ${projectAsset.name}`, error);
+        isFileMissing = true;
+      }
+      
+      // If no file in IndexedDB, check if we have base64 data to migrate
+      if (!file && projectAsset.uri && projectAsset.uri.startsWith('data:')) {
+        console.log(`🔄 Migrating base64 data to IndexedDB: ${projectAsset.name}`);
+        try {
+          // Convert base64 data URL back to File
+          const response = await fetch(projectAsset.uri);
+          const blob = await response.blob();
+          
+          // Determine file type from the data URL
+          const mimeType = projectAsset.uri.split(';')[0].split(':')[1];
+          const extension = mimeType.split('/')[1];
+          const fileName = projectAsset.name.includes('.') ? projectAsset.name : `${projectAsset.name}.${extension}`;
+          
+          file = new File([blob], fileName, { type: mimeType });
+          
+          // Store the migrated file in IndexedDB
+          await fileStorage.storeFile(projectAsset.id, file);
+          console.log(`✅ Migrated and stored file in IndexedDB: ${projectAsset.name}`);
+        } catch (error) {
+          console.error(`❌ Failed to migrate base64 data: ${projectAsset.name}`, error);
+        }
+      }
+      
+      // Create object URL for the file
+      let url = projectAsset.uri;
+      if (file) {
+        url = URL.createObjectURL(file);
+      } else if (isFileMissing) {
+        // Use a placeholder URL for missing files
+        url = `missing:${projectAsset.id}`;
+      }
+      
+      const asset: MediaAsset = {
+        id: projectAsset.id,
+        name: projectAsset.name,
+        type: projectAsset.kind === 'image' ? 'image' : 
+              projectAsset.kind === 'music' || projectAsset.kind === 'vo' ? 'audio' : 'video',
+        url: url,
+        thumbnail: projectAsset.kind === 'image' ? url : undefined,
         addedAt: new Date(),
-        file: undefined // Files are not stored in project JSON
+        file: file || undefined,
+        isMissing: isFileMissing // Add missing flag
       };
-    });
+      
+      loadedAssets.push(asset);
+      console.log(`🔍 Asset loaded: ${asset.name}`, asset);
+    }
     
     console.log("🔍 AssetsStore - Loaded assets:", loadedAssets);
     set({ assets: loadedAssets });
@@ -120,37 +201,19 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
     console.log("🔍 AssetsStore - Converting assets for project:", assets.length);
     console.log("🔍 AssetsStore - Raw assets:", assets);
     
-    const projectAssets = await Promise.all(assets.map(async (asset) => {
-      let dataUrl = asset.url;
-      
+    const projectAssets = assets.map((asset) => {
       console.log(`🔍 Processing asset ${asset.name}:`, {
         hasFile: !!asset.file,
         currentUrl: asset.url,
         type: asset.type
       });
       
-      // If we have a file, convert it to base64 data URL for persistence
-      if (asset.file) {
-        try {
-          console.log(`🔍 Converting file to base64 for ${asset.name}`);
-          dataUrl = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-              console.log(`✅ Successfully converted ${asset.name} to base64`);
-              resolve(reader.result as string);
-            };
-            reader.onerror = (error) => {
-              console.error(`❌ Failed to convert ${asset.name} to base64:`, error);
-              reject(error);
-            };
-            reader.readAsDataURL(asset.file!);
-          });
-        } catch (error) {
-          console.error("Failed to convert file to data URL:", error);
-          // Fall back to existing URL
-        }
-      } else {
-        console.log(`⚠️ No file object for ${asset.name}, using existing URL`);
+      // Only save file references, not the actual file data
+      // Ensure we don't save base64 data URLs
+      let uri = asset.url;
+      if (uri && uri.startsWith('data:')) {
+        console.warn(`⚠️ Preventing base64 save for ${asset.name}, using placeholder`);
+        uri = `blob:placeholder-${asset.id}`; // Placeholder for migrated files
       }
       
       const result = {
@@ -158,12 +221,12 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
         kind: asset.type === 'image' ? 'image' : 
               asset.type === 'audio' ? 'music' : 'video',
         name: asset.name,
-        uri: dataUrl
+        uri: uri
       };
       
       console.log(`🔍 Asset result for ${asset.name}:`, result);
       return result;
-    }));
+    });
     
     console.log("🔍 AssetsStore - Project assets:", projectAssets);
     return projectAssets;

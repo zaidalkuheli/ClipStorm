@@ -87,6 +87,7 @@ export type AudioClip = {
   gain?: number;
   originalDurationMs: number; // Store the original audio file duration
   audioOffsetMs?: number; // Offset within the original audio file (for cut clips)
+  trackId?: string; // Track assignment for vertical drag
 };
 export type AspectRatio = "9:16" | "1:1" | "16:9";
 export type Resolution = "1080x1920" | "720x1280";
@@ -141,6 +142,7 @@ interface EditorState {
   triggerSnapAnimation: (id: string) => void;
   updateSceneTransform: (id: string, transform: { x: number; y: number; scale: number }) => void;
   moveSceneToTrack: (sceneId: string, trackId: string) => void;
+  moveAudioToTrack: (audioId: string, trackId: string) => void;
 
   // core editing actions
   selectedAudioId: string | null;
@@ -155,11 +157,11 @@ interface EditorState {
   msPerPx: () => number;
   pxToMs: (px: number) => number;
   msToPx: (ms: number) => number;
-  computeInsertMs: () => number;
-  computeAudioInsertMs: () => number;
+  computeInsertMs: (trackId?: string) => number;
+  computeAudioInsertMs: (trackId?: string) => number;
   normalizeDuration: () => void;
-  addSceneFromAsset: (assetId: string, opts?: { atMs?: number; durationMs?: number; label?: string }) => string;
-  addAudioFromAsset: (assetId: string, kind: "vo"|"music", opts?: { atMs?: number; durationMs?: number }) => string;
+  addSceneFromAsset: (assetId: string, opts?: { atMs?: number; durationMs?: number; label?: string; trackId?: string }) => string;
+  addAudioFromAsset: (assetId: string, kind: "vo"|"music", opts?: { atMs?: number; durationMs?: number; trackId?: string }) => string;
 
   // audio manipulation actions
   selectAudio: (id: string | null) => void;
@@ -359,18 +361,22 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     // Sort scenes by start time
     updatedScenes.sort((a, b) => a.startMs - b.startMs);
 
-    // Apply magnetic linking after move
+    // Apply magnetic linking after move (only within the same track)
     const sortedScenes = [...updatedScenes].sort((a, b) => a.startMs - b.startMs);
     const movedIndex = sortedScenes.findIndex(s => s.id === id);
     const movedScene = sortedScenes[movedIndex];
-    const prevScene = movedIndex > 0 ? sortedScenes[movedIndex - 1] : null;
-    const nextScene = movedIndex < sortedScenes.length - 1 ? sortedScenes[movedIndex + 1] : null;
+    
+    // Only consider scenes in the same track for magnetic linking
+    const scenesInSameTrack = sortedScenes.filter(s => s.trackId === movedScene.trackId);
+    const movedIndexInTrack = scenesInSameTrack.findIndex(s => s.id === id);
+    const prevScene = movedIndexInTrack > 0 ? scenesInSameTrack[movedIndexInTrack - 1] : null;
+    const nextScene = movedIndexInTrack < scenesInSameTrack.length - 1 ? scenesInSameTrack[movedIndexInTrack + 1] : null;
 
     const snapMs = pxToMs(SNAP_PX, pxPerSec);
     const unlinkMs = pxToMs(UNLINK_PX, pxPerSec);
 
-    // Check left edge magnetic linking
-    if (prevScene) {
+    // Check left edge magnetic linking (only within same track)
+    if (prevScene && prevScene.trackId === movedScene.trackId) {
       const gap = movedScene.startMs - prevScene.endMs;
       if (gap >= 0 && gap <= snapMs) {
         // Snap & link to previous scene
@@ -383,8 +389,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
     }
 
-    // Check right edge magnetic linking
-    if (nextScene) {
+    // Check right edge magnetic linking (only within same track)
+    if (nextScene && nextScene.trackId === movedScene.trackId) {
       const gap = nextScene.startMs - movedScene.endMs;
       if (gap >= 0 && gap <= snapMs) {
         // Snap & link to next scene
@@ -451,8 +457,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         if (i < 0) return;
 
         const cur = sortedScenes[i];
-        const prev = sortedScenes[i-1];
-        const next = sortedScenes[i+1];
+        
+        // Only consider scenes in the same track for magnetic linking
+        const scenesInSameTrack = sortedScenes.filter(sc => sc.trackId === cur.trackId);
+        const iInTrack = scenesInSameTrack.findIndex(sc => sc.id === id);
+        const prev = iInTrack > 0 ? scenesInSameTrack[iInTrack - 1] : null;
+        const next = iInTrack < scenesInSameTrack.length - 1 ? scenesInSameTrack[iInTrack + 1] : null;
 
         const snapMs = pxToMs(SNAP_PX, pxPerSec);
         const unlinkMs = pxToMs(UNLINK_PX, pxPerSec);
@@ -478,8 +488,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             // not linked: don't affect prev
             cur.startMs = newStart;
 
-            // magnet: if close enough to prev.end => snap + link
-            if (prev) {
+            // magnet: if close enough to prev.end => snap + link (only within same track)
+            if (prev && prev.trackId === cur.trackId) {
               const gap = cur.startMs - prev.endMs; // >= 0 if separated
               if (gap >= 0 && gap <= snapMs) {
                 // snap & link
@@ -515,8 +525,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             // not linked: don't affect next
             cur.endMs = newEnd;
 
-            // magnet: close to next.start => snap + link
-            if (next) {
+            // magnet: close to next.start => snap + link (only within same track)
+            if (next && next.trackId === cur.trackId) {
               const gap = next.startMs - cur.endMs; // >= 0 if separated
               if (gap >= 0 && gap <= snapMs) {
                 cur.endMs = next.startMs;
@@ -534,7 +544,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         get().normalizeDuration(); // Extend timeline if needed
       },
 
-      selectScene: (id) => set({ selectedSceneId: id }),
+      selectScene: (id) => set({ selectedSceneId: id, selectedAudioId: id ? null : null }),
 
       triggerSnapAnimation: (id) => {
         set({ snapAnimationId: id });
@@ -551,9 +561,35 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   moveSceneToTrack: (sceneId, trackId) => {
+    console.log('🎬 MOVING SCENE TO TRACK:', { sceneId, trackId });
     set(state => ({
-      scenes: state.scenes.map(scene => 
-        scene.id === sceneId ? { ...scene, trackId } : scene
+      scenes: state.scenes.map(scene => {
+        if (scene.id === sceneId) {
+          console.log('🎬 SCENE TRACK UPDATED:', { 
+            sceneId, 
+            oldTrackId: scene.trackId, 
+            newTrackId: trackId,
+            sceneStartMs: scene.startMs,
+            sceneEndMs: scene.endMs,
+            hadLinks: { left: scene.linkLeftId, right: scene.linkRightId }
+          });
+          // Break all magnetic links when moving between tracks
+          return { 
+            ...scene, 
+            trackId,
+            linkLeftId: null,
+            linkRightId: null
+          };
+        }
+        return scene;
+      })
+    }));
+  },
+
+  moveAudioToTrack: (audioId, trackId) => {
+    set(state => ({
+      audioClips: state.audioClips.map(audio => 
+        audio.id === audioId ? { ...audio, trackId } : audio
       )
     }));
   },
@@ -703,21 +739,33 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   pxToMs: (px) => Math.max(0, Math.round(px * (1000 / get().pxPerSec))),
   msToPx: (ms) => Math.max(0, Math.round(ms * (get().pxPerSec / 1000))),
 
-  computeInsertMs: () => {
+  computeInsertMs: (trackId) => {
     const { playheadMs, scenes } = get();
-    const maxSceneEnd = scenes.length ? Math.max(...scenes.map(s => s.endMs)) : 0;
-    // For video/image media, only consider scenes, not audio clips
-    // If no scenes exist, start at timeline beginning (0ms)
-    // Otherwise, insert at the end of the last scene
+    // Filter scenes by trackId if provided, otherwise use all scenes
+    const relevantScenes = trackId ? scenes.filter(s => s.trackId === trackId) : scenes;
+    const maxSceneEnd = relevantScenes.length ? Math.max(...relevantScenes.map(s => s.endMs)) : 0;
+    
+    console.log('🎬 computeInsertMs:', { 
+      trackId, 
+      relevantScenesCount: relevantScenes.length,
+      maxSceneEnd,
+      allScenesCount: scenes.length 
+    });
+    
+    // For video/image media, only consider scenes in the specific track
+    // If no scenes exist in this track, start at timeline beginning (0ms)
+    // Otherwise, insert at the end of the last scene in this track
     return maxSceneEnd;
   },
 
-  computeAudioInsertMs: () => {
+  computeAudioInsertMs: (trackId) => {
     const { playheadMs, audioClips } = get();
-    const maxAudioEnd = audioClips.length ? Math.max(...audioClips.map(a => a.endMs)) : 0;
-    // For audio media, only consider audio clips, not scenes
-    // If no audio clips exist, start at timeline beginning (0ms)
-    // Otherwise, insert at the end of the last audio clip
+    // Filter audio clips by trackId if provided, otherwise use all audio clips
+    const relevantAudioClips = trackId ? audioClips.filter(a => a.trackId === trackId) : audioClips;
+    const maxAudioEnd = relevantAudioClips.length ? Math.max(...relevantAudioClips.map(a => a.endMs)) : 0;
+    // For audio media, only consider audio clips in the specific track
+    // If no audio clips exist in this track, start at timeline beginning (0ms)
+    // Otherwise, insert at the end of the last audio clip in this track
     return maxAudioEnd;
   },
 
@@ -730,19 +778,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   addSceneFromAsset: (assetId, opts) => {
-    // Always place at start of track if no specific position is given and timeline is empty
-    const { scenes, audioClips } = get();
-    const isTimelineEmpty = scenes.length === 0 && audioClips.length === 0;
-    const at = typeof opts?.atMs === "number" ? Math.max(0, opts.atMs) : (isTimelineEmpty ? 0 : get().computeInsertMs());
-    const dflt = opts?.durationMs ?? 3000; // images=3s, videos=5s set by caller
-    const id = crypto.randomUUID();
-    const label = opts?.label;
-    
-    // Find appropriate track based on asset type
-    const { tracks } = get();
+    const { scenes, audioClips, tracks } = get();
     const asset = useAssetsStore.getState().getById(assetId);
     const trackType = asset?.type === 'image' || asset?.type === 'video' ? 'video' : 'audio';
-    let defaultTrack = tracks.find(t => t.type === trackType);
+    
+    // Find appropriate track based on asset type or provided trackId
+    let defaultTrack = tracks.find(t => t.id === opts?.trackId) || tracks.find(t => t.type === trackType);
     
     // If no track of the required type exists, create one
     if (!defaultTrack) {
@@ -778,6 +819,24 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
     }
     
+    // Now determine insertion position using the final track ID
+    const finalTrackId = defaultTrack.id;
+    const isTrackEmpty = scenes.filter(s => s.trackId === finalTrackId).length === 0;
+    const at = typeof opts?.atMs === "number" ? Math.max(0, opts.atMs) : (isTrackEmpty ? 0 : get().computeInsertMs(finalTrackId));
+    const dflt = opts?.durationMs ?? 3000; // images=3s, videos=5s set by caller
+    const id = crypto.randomUUID();
+    const label = opts?.label;
+    
+    console.log('🎬 Track-specific insertion:', { 
+      finalTrackId, 
+      trackName: defaultTrack.name,
+      isTrackEmpty, 
+      scenesInTrack: scenes.filter(s => s.trackId === finalTrackId).length,
+      totalScenes: scenes.length,
+      insertionMs: at,
+      allScenes: scenes.map(s => ({ id: s.id, trackId: s.trackId, startMs: s.startMs, endMs: s.endMs }))
+    });
+    
     const scene = { 
       id, 
       startMs: at, 
@@ -788,6 +847,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       linkLeftId: null, 
       linkRightId: null 
     };
+    
+    console.log('🎬 FINAL SCENE CREATION:', { 
+      sceneId: id, 
+      trackId: defaultTrack.id, 
+      trackName: defaultTrack.name,
+      startMs: at, 
+      endMs: at + dflt,
+      isTrackEmpty,
+      scenesInTrack: scenes.filter(s => s.trackId === finalTrackId).length
+    });
     // prevent overlap: shift if needed
     const updatedScenes = [...scenes, scene].sort((a,b)=>a.startMs-b.startMs);
     set({ scenes: updatedScenes });
@@ -797,17 +866,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   addAudioFromAsset: (assetId, kind, opts) => {
-    // Always place at start of track if no specific position is given and timeline is empty
-    const { scenes, audioClips } = get();
-    const isTimelineEmpty = scenes.length === 0 && audioClips.length === 0;
-    const at = typeof opts?.atMs === "number" ? Math.max(0, opts.atMs) : (isTimelineEmpty ? 0 : get().computeAudioInsertMs());
-    const dflt = opts?.durationMs ?? 30000; // 30s default, will be updated with actual duration
-    const id = crypto.randomUUID();
-    
-    // Find appropriate track based on asset type
-    const { tracks } = get();
+    const { scenes, audioClips, tracks } = get();
     const trackType = 'audio';
-    let defaultTrack = tracks.find(t => t.type === trackType);
+    
+    // Find appropriate track based on asset type or provided trackId
+    let defaultTrack = tracks.find(t => t.id === opts?.trackId) || tracks.find(t => t.type === trackType);
     
     // If no audio track exists, create one
     if (!defaultTrack) {
@@ -831,7 +894,24 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
     }
     
-    const clip = { id, startMs: at, endMs: at + dflt, assetId, kind, originalDurationMs: dflt };
+    // Now determine insertion position using the final track ID
+    const finalTrackId = defaultTrack.id;
+    const isTrackEmpty = audioClips.filter(a => a.trackId === finalTrackId).length === 0;
+    const at = typeof opts?.atMs === "number" ? Math.max(0, opts.atMs) : (isTrackEmpty ? 0 : get().computeAudioInsertMs(finalTrackId));
+    const dflt = opts?.durationMs ?? 30000; // 30s default, will be updated with actual duration
+    const id = crypto.randomUUID();
+    
+    console.log('🎵 Track-specific audio insertion:', { 
+      finalTrackId, 
+      trackName: defaultTrack.name,
+      isTrackEmpty, 
+      audioClipsInTrack: audioClips.filter(a => a.trackId === finalTrackId).length,
+      totalAudioClips: audioClips.length,
+      insertionMs: at,
+      allAudioClips: audioClips.map(a => ({ id: a.id, trackId: a.trackId, startMs: a.startMs, endMs: a.endMs }))
+    });
+    
+    const clip = { id, startMs: at, endMs: at + dflt, assetId, kind, originalDurationMs: dflt, trackId: defaultTrack.id };
     set({ audioClips: [...get().audioClips, clip].sort((a,b)=>a.startMs-b.startMs) });
     get().normalizeDuration();
     set(state => ({ history: { ...state.history, future: [] }}));
@@ -1059,7 +1139,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       });
       
       if (ripple) {
-        // Close the gap by shifting everything after to the left
+        // First remove the scene from state, then shift to close the gap
+        set({ scenes: newScenes });
         get().shiftRightFrom(scene.endMs, -gapMs);
       }
       
@@ -1087,7 +1168,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const newAudioClips = audioClips.filter(a => a.id !== selectedAudioId);
       
       if (ripple) {
-        // Close the gap by shifting everything after to the left
+        // First remove the audio from state, then shift to close the gap
+        set({ audioClips: newAudioClips });
         get().shiftRightFrom(audio.endMs, -gapMs);
       }
       
@@ -1155,7 +1237,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   // Audio manipulation actions
-  selectAudio: (id) => set({ selectedAudioId: id }),
+  selectAudio: (id) => set({ selectedAudioId: id, selectedSceneId: null }),
 
   moveAudio: (id, newStartMs, pxPerSec) => {
     const { audioClips, durationMs, triggerSnapAnimation } = get();

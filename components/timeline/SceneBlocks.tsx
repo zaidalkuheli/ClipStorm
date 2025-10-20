@@ -46,6 +46,11 @@ export function SceneBlocks({ trackId }: { trackId?: string }) {
   const duplicateSelection = useEditorStore(s => s.duplicateSelection);
   const fps = useEditorStore(s => s.fps);
   
+  const [dragPreview, setDragPreview] = useState<{
+    trackId: string | null;
+    isValid: boolean;
+  } | null>(null);
+  
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -206,14 +211,22 @@ export function SceneBlocks({ trackId }: { trackId?: string }) {
 
     const contentX = getContentX(e);
 
-    // Check for auto-scroll during any drag operation
-    if (d || m) {
+    // Check for auto-scroll during any drag operation (but not during vertical drag)
+    if ((d || m) && !m?.isVerticalDrag) {
       checkAutoScroll(e.clientX);
+    } else {
+      // If not dragging, ensure auto-scroll is stopped
+      stopAutoScroll();
     }
 
     // Handle resize dragging
     if (d) {
-      const targetMs = Math.max(0, (contentX / pxPerSec) * 1000);
+      // Snap scene edge to playhead if close
+      const rawMs = Math.max(0, (contentX / pxPerSec) * 1000);
+      const playheadPx = (playheadMs / 1000) * pxPerSec; // viewport px
+      const edgePx = contentX; // current edge in viewport px
+      const snapPx = 8; // tight snap to playhead for precision
+      const targetMs = Math.abs(edgePx - playheadPx) <= snapPx ? playheadMs : rawMs;
 
       // throttle to one store update per frame
       if (rafRef.current == null) {
@@ -231,13 +244,24 @@ export function SceneBlocks({ trackId }: { trackId?: string }) {
       
       // Detect if this is a vertical drag (moving between tracks)
       if (!m.isVerticalDrag && Math.abs(deltaY) > 10 && Math.abs(deltaX) < 20) {
+        console.log('🎬 VERTICAL DRAG TRIGGERED:', { 
+          sceneId: m.id, 
+          deltaY, 
+          deltaX, 
+          threshold: { y: 10, x: 20 }
+        });
         m.isVerticalDrag = true;
       }
       
       if (m.isVerticalDrag) {
         // Handle vertical drag - find target track
         const tracks = useEditorStore.getState().tracks;
-        const currentTrack = tracks.find(t => t.id === trackId);
+        
+        // Find the current track by looking at the scene's trackId
+        const currentScene = scenes.find(s => s.id === m.id);
+        if (!currentScene) return;
+        
+        const currentTrack = tracks.find(t => t.id === currentScene.trackId);
         if (!currentTrack) return;
         
         // Find target track based on Y position
@@ -255,10 +279,23 @@ export function SceneBlocks({ trackId }: { trackId?: string }) {
         // Move to target track if different
         if (targetTrackId !== currentTrack.id) {
           const targetTrack = tracks.find(t => t.id === targetTrackId);
+          console.log('🎬 VERTICAL DRAG DETECTED:', { 
+            sceneId: m.id, 
+            currentTrackId: currentTrack.id, 
+            targetTrackId, 
+            targetTrack: targetTrack?.name,
+            targetTrackType: targetTrack?.type,
+            currentTrackType: currentTrack.type
+          });
           if (targetTrack && targetTrack.type === currentTrack.type) {
             moveSceneToTrack(m.id, targetTrackId);
             m.startY = e.clientY; // Reset Y to prevent continuous switching
+            setDragPreview({ trackId: targetTrackId, isValid: true });
+          } else {
+            setDragPreview({ trackId: targetTrackId, isValid: false });
           }
+        } else {
+          setDragPreview(null);
         }
       } else {
         // Handle horizontal drag
@@ -292,7 +329,11 @@ export function SceneBlocks({ trackId }: { trackId?: string }) {
 
       // final snap on release using zoom-aware grid
       const contentX = getContentX(e);
-      const finalTargetMs = Math.max(0, (contentX / pxPerSec) * 1000);
+      const playheadPx = (playheadMs / 1000) * pxPerSec;
+      const edgePx = contentX;
+      const snapPx = 8;
+      const rawFinal = Math.max(0, (contentX / pxPerSec) * 1000);
+      const finalTargetMs = Math.abs(edgePx - playheadPx) <= snapPx ? playheadMs : rawFinal;
       resizeSceneTo(d.id, d.edge, finalTargetMs, MIN_MS, gridMsFromZoom(), pxPerSec);
       
       // Commit transaction
@@ -304,6 +345,7 @@ export function SceneBlocks({ trackId }: { trackId?: string }) {
       moveDragRef.current = null;
       document.body.style.cursor = "";
       stopAutoScroll();
+      setDragPreview(null); // Clear drag preview
       
       const contentX = getContentX(e);
       const deltaX = contentX - m.startX;
@@ -316,6 +358,27 @@ export function SceneBlocks({ trackId }: { trackId?: string }) {
       commitTx();
     }
   };
+
+  // Stop auto-scroll when pointer leaves the track area or component unmounts
+  const onPointerLeave = () => {
+    stopAutoScroll();
+  };
+
+  React.useEffect(() => {
+    const handleDocPointerUp = () => stopAutoScroll();
+    const handleVisibility = () => {
+      if (document.hidden) stopAutoScroll();
+    };
+    document.addEventListener('pointerup', handleDocPointerUp);
+    document.addEventListener('pointercancel', handleDocPointerUp);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      document.removeEventListener('pointerup', handleDocPointerUp);
+      document.removeEventListener('pointercancel', handleDocPointerUp);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      stopAutoScroll();
+    };
+  }, []);
 
   const onSceneClick = (e: React.MouseEvent, sceneId: string) => {
     e.stopPropagation();
@@ -354,15 +417,7 @@ export function SceneBlocks({ trackId }: { trackId?: string }) {
       onPointerCancel={onPointerUp}
     >
       <div className="relative h-full" style={{ width: Math.max(1, msToPx(durationMs)) }}>
-        {scenes.length === 0 ? (
-          // Empty state - clean and minimal
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-center">
-              <div className="text-xs text-[var(--text-tertiary)] mb-1">No scenes yet</div>
-              <div className="text-xs text-[var(--text-tertiary)]">Drag to create your first scene</div>
-            </div>
-          </div>
-        ) : (
+        {scenes.length === 0 ? null : (
           scenes.map((s, index) => {
           const left = msToPx(s.startMs);
           const width = msToPx(s.endMs - s.startMs);

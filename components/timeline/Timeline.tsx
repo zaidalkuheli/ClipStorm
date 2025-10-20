@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Scissors, Plus, ChevronDown } from "lucide-react";
+import { Scissors, Plus, ChevronDown, ZoomIn as ZoomInIcon, ZoomOut as ZoomOutIcon, Crosshair } from "lucide-react";
 import { Panel } from "@/components/ui/Panel";
 import { useEditorStore } from "@/stores/editorStore";
 import { Ruler } from "./Ruler";
@@ -119,17 +119,11 @@ export function Timeline() {
   // Handle zoom to playhead with scrolling
   const handleZoomToPlayhead = () => {
     const playheadPx = zoomToPlayhead();
-    const scrollContainer = contentRef.current;
-    if (scrollContainer) {
-      // Center the playhead in the viewport
-      const containerWidth = scrollContainer.clientWidth;
+    const sc = scrollRef.current; // use the scroll container, not the content div
+    if (sc) {
+      const containerWidth = sc.clientWidth;
       const targetScrollLeft = playheadPx - (containerWidth / 2);
-      
-      // Smooth scroll to the playhead position
-      scrollContainer.scrollTo({
-        left: Math.max(0, targetScrollLeft),
-        behavior: 'smooth'
-      });
+      sc.scrollTo({ left: Math.max(0, targetScrollLeft), behavior: 'smooth' });
     }
   };
 
@@ -306,30 +300,31 @@ export function Timeline() {
     <Panel className="h-full relative timeline-container">
       <div className="flex h-full min-h-0 flex-col">
             {/* Controls row */}
-            <div className="flex items-center justify-between px-3 py-1 text-xs text-[var(--muted)]">
-              <div className="flex items-center gap-3 text-[10px] text-[var(--text-tertiary)]">
-                <span>Duration: {formatDuration(durationMs)}</span>
-                <span>Zoom: {Math.round(pxPerSec)}px/s</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button className="badge" onClick={handleZoomOut}>Zoom Out</button>
-                <button className="badge" onClick={handleZoomIn}>Zoom In</button>
+            <div className="flex items-center justify-end px-3 py-1 text-xs text-[var(--muted)]">
+              <div className="flex items-center gap-1.5">
+                <button 
+                  className="badge" 
+                  onClick={handleZoomOut}
+                  title="Zoom out"
+                  aria-label="Zoom out"
+                >
+                  <ZoomOutIcon size={12} />
+                </button>
+                <button 
+                  className="badge" 
+                  onClick={handleZoomIn}
+                  title="Zoom in"
+                  aria-label="Zoom in"
+                >
+                  <ZoomInIcon size={12} />
+                </button>
                 <button 
                   className="badge bg-blue-600/20 text-blue-400 border-blue-500/30" 
                   onClick={handleZoomToPlayhead}
                   title="Center playhead in view (F)"
+                  aria-label="Center playhead"
                 >
-                  🎯 Center
-                </button>
-                <button 
-                  className="badge bg-green-600/20 text-green-400 border-green-500/30" 
-                  onClick={() => addScene({ 
-                    label: `Scene ${Math.floor(Math.random() * 100)}`, 
-                    startMs: durationMs, 
-                    endMs: durationMs + 3000 
-                  })}
-                >
-                  + Add Scene
+                  <Crosshair size={12} />
                 </button>
                 <button 
                   className="badge bg-red-600/20 text-red-400 border-red-500/30" 
@@ -352,29 +347,29 @@ export function Timeline() {
             {/* Left labels column - fixed position, NOT scrollable */}
             <div className="flex-shrink-0 w-32 bg-[var(--surface-primary)] border-r border-[var(--border-primary)] select-none">
               {/* Timeline label with add track button */}
-              <div className="h-8 flex items-center justify-between px-2 text-[10px] text-[var(--text-secondary)] font-medium select-none">
-                <span>Timeline</span>
+              <div className="h-8 flex items-center justify-between px-2 text-[11px] text-[var(--text-secondary)] font-medium select-none">
+                <span className="text-[12px] font-semibold">Timeline</span>
                 <div className="relative" ref={dropdownRef}>
                   <button
                     onClick={() => setShowAddTrackDropdown(!showAddTrackDropdown)}
-                    className="p-0.5 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)] rounded transition-colors flex items-center gap-0.5"
+                    className="p-1 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)] rounded transition-colors flex items-center gap-1"
                     title="Add track"
                   >
-                    <Plus size={10} />
-                    <ChevronDown size={8} />
+                    <Plus size={12} />
+                    <ChevronDown size={10} />
                   </button>
                   
                   {showAddTrackDropdown && (
-                    <div className="absolute top-full left-0 mt-1 w-28 bg-[var(--surface-primary)] border border-[var(--border-primary)] rounded-md shadow-lg z-50">
+                    <div className="absolute top-full left-0 mt-1 w-36 bg-[var(--surface-primary)] border border-[var(--border-primary)] rounded-md shadow-lg z-50">
                       <button
                         onClick={() => handleAddTrack("video")}
-                        className="w-full px-2 py-1 text-left text-[10px] text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)] flex items-center gap-1"
+                        className="w-full px-3 py-1.5 text-left text-[11px] text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)] flex items-center gap-2"
                       >
                         🎬 Media
                       </button>
                       <button
                         onClick={() => handleAddTrack("audio")}
-                        className="w-full px-2 py-1 text-left text-[10px] text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)] flex items-center gap-1"
+                        className="w-full px-3 py-1.5 text-left text-[11px] text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)] flex items-center gap-2"
                       >
                         🎵 Audio
                       </button>

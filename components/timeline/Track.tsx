@@ -23,7 +23,11 @@ export function Track({ track, height }: TrackProps) {
     [allScenes, track.id]
   );
   
-  const audioClips = useEditorStore(s => s.audioClips);
+  const allAudioClips = useEditorStore(s => s.audioClips);
+  const audioClips = React.useMemo(
+    () => track.type === "audio" ? allAudioClips.filter(audio => audio.trackId === track.id) : [],
+    [allAudioClips, track.id, track.type]
+  );
   const getAssetById = useAssetsStore(s => s.getById);
   const pxToMs = useEditorStore(s => s.pxToMs);
   const beginTx = useEditorStore(s => s.beginTx);
@@ -54,7 +58,7 @@ export function Track({ track, height }: TrackProps) {
     const atMs = getMsFromClientX(e.clientX);
     beginTx("Drop asset (video)");
     const dur = type === "video" ? 5000 : 3000;
-    addSceneFromAsset(id, { atMs, durationMs: dur });
+    addSceneFromAsset(id, { atMs, durationMs: dur, trackId: track.id });
     commitTx();
   }
 
@@ -66,7 +70,7 @@ export function Track({ track, height }: TrackProps) {
     if (type !== "audio") return;
     const atMs = getMsFromClientX(e.clientX);
     beginTx("Drop asset (audio)");
-    addAudioFromAsset(id, "music", { atMs, durationMs: 30000 }); // 30s default
+    addAudioFromAsset(id, "music", { atMs, durationMs: 30000, trackId: track.id }); // 30s default
     commitTx();
   }
 
@@ -87,7 +91,7 @@ export function Track({ track, height }: TrackProps) {
       {track.type === "video" ? (
         <SceneBlocks trackId={track.id} />
       ) : (
-        <AudioBlocks />
+        <AudioBlocks trackId={track.id} />
       )}
     </div>
   );

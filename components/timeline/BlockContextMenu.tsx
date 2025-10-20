@@ -16,7 +16,6 @@ export function BlockContextMenu({
   x,
   y,
   onClose,
-  onSplit,
   onDelete,
   onRippleDelete,
   onDuplicate,
@@ -51,7 +50,6 @@ export function BlockContextMenu({
   }, [onClose]);
 
   const menuItems = [
-    { label: "Split at Playhead", action: onSplit },
     { label: "Delete", action: onDelete },
     { label: "Ripple Delete", action: onRippleDelete },
     { label: "Duplicate", action: onDuplicate },

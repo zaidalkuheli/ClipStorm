@@ -25,6 +25,19 @@ const TrackSchema = z.object({
   type: z.enum(["video", "audio"]),
 });
 
+// Audio clip schema
+const AudioClipSchema = z.object({
+  id: z.string(),
+  startMs: z.number(),
+  endMs: z.number(),
+  assetId: z.string(),
+  kind: z.enum(["vo", "music"]),
+  gain: z.number().optional(),
+  originalDurationMs: z.number(),
+  audioOffsetMs: z.number().optional(),
+  trackId: z.string().optional(),
+});
+
 // Scene schema (matches editor store Scene type)
 const SceneSchema = z.object({
   id: z.string(),
@@ -59,6 +72,7 @@ const SettingsSchema = z.object({
 const TimelineSchema = z.object({
   tracks: z.array(TrackSchema),
   scenes: z.array(SceneSchema),
+  audioClips: z.array(AudioClipSchema),
 });
 
 // Complete project schema
@@ -104,6 +118,7 @@ export function makeEmptyProject(name?: string): Project {
         { id: "audio-track-1", name: "Audio 1", type: "audio" }
       ],
       scenes: [], // Start with empty timeline for clean UI
+      audioClips: [], // Start with empty audio clips
     },
   };
 }
@@ -113,42 +128,58 @@ export function migrateToLatest(data: unknown): Project {
   try {
     return ProjectV1.parse(data);
   } catch (error) {
-    if (error instanceof Error && error.message.includes('assets')) {
-      // Check if assets field exists and what type it is
+    if (error instanceof Error) {
       const dataObj = data as any;
       if (dataObj && typeof dataObj === 'object') {
-        if (dataObj.assets !== undefined) {
-          if (Array.isArray(dataObj.assets)) {
-            throw new Error(`Invalid project data: assets array has invalid items. ${error.message}`);
-          } else {
-            // Try to fix common issues with assets field
-            console.warn("🔧 Attempting to fix malformed assets field:", typeof dataObj.assets);
-            
-            // If assets is an object, try to convert it to an array
-            if (typeof dataObj.assets === 'object' && dataObj.assets !== null) {
-              const assetsArray = Object.values(dataObj.assets);
-              if (Array.isArray(assetsArray)) {
-                dataObj.assets = assetsArray;
-                console.log("🔧 Fixed assets field: converted object to array");
-                // Try parsing again with fixed data
-                try {
-                  return ProjectV1.parse(dataObj);
-                } catch (retryError) {
-                  throw new Error(`Invalid project data: assets field was an object, tried to convert to array but still invalid. ${retryError instanceof Error ? retryError.message : 'Unknown error'}`);
+        
+        // Handle missing audioClips field
+        if (error.message.includes('audioClips') && error.message.includes('expected array, received undefined')) {
+          console.warn("🔧 Adding missing audioClips field to timeline");
+          if (dataObj.timeline && typeof dataObj.timeline === 'object') {
+            dataObj.timeline.audioClips = [];
+            try {
+              return ProjectV1.parse(dataObj);
+            } catch (retryError) {
+              throw new Error(`Invalid project data: added missing audioClips field but still invalid. ${retryError instanceof Error ? retryError.message : 'Unknown error'}`);
+            }
+          }
+        }
+        
+        // Handle missing assets field
+        if (error.message.includes('assets')) {
+          if (dataObj.assets !== undefined) {
+            if (Array.isArray(dataObj.assets)) {
+              throw new Error(`Invalid project data: assets array has invalid items. ${error.message}`);
+            } else {
+              // Try to fix common issues with assets field
+              console.warn("🔧 Attempting to fix malformed assets field:", typeof dataObj.assets);
+              
+              // If assets is an object, try to convert it to an array
+              if (typeof dataObj.assets === 'object' && dataObj.assets !== null) {
+                const assetsArray = Object.values(dataObj.assets);
+                if (Array.isArray(assetsArray)) {
+                  dataObj.assets = assetsArray;
+                  console.log("🔧 Fixed assets field: converted object to array");
+                  // Try parsing again with fixed data
+                  try {
+                    return ProjectV1.parse(dataObj);
+                  } catch (retryError) {
+                    throw new Error(`Invalid project data: assets field was an object, tried to convert to array but still invalid. ${retryError instanceof Error ? retryError.message : 'Unknown error'}`);
+                  }
                 }
               }
+              
+              throw new Error(`Invalid project data: assets field is not an array (received ${typeof dataObj.assets}). Expected an array of asset objects.`);
             }
-            
-            throw new Error(`Invalid project data: assets field is not an array (received ${typeof dataObj.assets}). Expected an array of asset objects.`);
-          }
-        } else {
-          // If assets field is missing, add an empty array
-          console.warn("🔧 Adding missing assets field");
-          dataObj.assets = [];
-          try {
-            return ProjectV1.parse(dataObj);
-          } catch (retryError) {
-            throw new Error(`Invalid project data: missing assets field, tried to add empty array but still invalid. ${retryError instanceof Error ? retryError.message : 'Unknown error'}`);
+          } else {
+            // If assets field is missing, add an empty array
+            console.warn("🔧 Adding missing assets field");
+            dataObj.assets = [];
+            try {
+              return ProjectV1.parse(dataObj);
+            } catch (retryError) {
+              throw new Error(`Invalid project data: missing assets field, tried to add empty array but still invalid. ${retryError instanceof Error ? retryError.message : 'Unknown error'}`);
+            }
           }
         }
       }
@@ -161,6 +192,7 @@ export function projectToEditor(project: Project) {
   return {
     tracks: project.timeline.tracks,
     scenes: project.timeline.scenes,
+    audioClips: project.timeline.audioClips || [], // Handle missing audioClips in old projects
     durationMs: project.settings.durationMs,
     fps: project.settings.fps,
     aspect: project.settings.aspect,
@@ -182,6 +214,17 @@ export function editorToProject(
       endMs: number;
       linkLeftId?: string | null;
       linkRightId?: string | null;
+      trackId?: string;
+    }>;
+    audioClips: Array<{
+      id: string;
+      startMs: number;
+      endMs: number;
+      assetId: string;
+      kind: "vo" | "music";
+      gain?: number;
+      originalDurationMs: number;
+      audioOffsetMs?: number;
       trackId?: string;
     }>;
     durationMs: number;
@@ -211,6 +254,7 @@ export function editorToProject(
       timeline: {
         tracks: editorState.tracks,
         scenes: editorState.scenes,
+        audioClips: editorState.audioClips,
       },
     };
   }
@@ -234,6 +278,7 @@ export function editorToProject(
     timeline: {
       tracks: editorState.tracks,
       scenes: editorState.scenes,
+      audioClips: editorState.audioClips,
     },
   };
 }

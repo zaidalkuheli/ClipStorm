@@ -39,12 +39,17 @@ export function AppHeader() {
   const importJSON = useProjectStore(s => s.importJSON);
 
   // Project menu handlers
-  const handleNewProject = () => {
+  const handleNewProject = async () => {
     console.log("🔍 handleNewProject clicked");
     const name = prompt("Project name:");
-    newProject(name || undefined);
-    setFileHandle(null); // Clear file handle for new project
-    setIsProjectMenuOpen(false);
+    try {
+      await newProject(name || undefined);
+      setFileHandle(null); // Clear file handle for new project
+      setIsProjectMenuOpen(false);
+    } catch (error) {
+      console.error("❌ Failed to create new project:", error);
+      alert(`Failed to create new project: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   };
 
   const handleSave = async () => {
@@ -60,8 +65,9 @@ export function AppHeader() {
       
       // Update existing file
       const editorState = useEditorStore.getState().getSerializableState();
+      const assets = await useAssetsStore.getState().getAssetsForProject();
       const { editorToProject } = await import("@/lib/projectSchema");
-      const updatedProject = editorToProject(editorState, project);
+      const updatedProject = editorToProject(editorState, project, assets);
       
       const writable = await fileHandle.createWritable();
       await writable.write(JSON.stringify(updatedProject, null, 2));

@@ -14,8 +14,8 @@ interface ProjectState {
   recentFiles: string[]; // Recently opened/saved files
   
   // Actions
-  newProject: (name?: string) => void;
-  loadProject: (project: Project) => void;
+  newProject: (name?: string) => Promise<void>;
+  loadProject: (project: Project) => Promise<void>;
   markDirty: () => Promise<void>;
   save: () => Promise<void>;
   saveAs: () => void;
@@ -43,12 +43,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   currentFilePath: null,
   recentFiles: [],
 
-  newProject: (name?: string) => {
+  newProject: async (name?: string) => {
     const project = makeEmptyProject(name);
     const editorStore = useEditorStore.getState();
     
     // Update editor state with new project data
+    editorStore.setTracks(project.timeline.tracks);
     editorStore.setScenes(project.timeline.scenes);
+    editorStore.setAudioClips(project.timeline.audioClips);
     editorStore.setDuration(project.settings.durationMs);
     editorStore.setFps(project.settings.fps as FrameRate);
     editorStore.setAspect(project.settings.aspect);
@@ -57,7 +59,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     
     // Clear assets store for new project
     console.log("🔍 ProjectStore - Clearing assets for new project");
-    useAssetsStore.getState().clearAssets();
+    await useAssetsStore.getState().clearAssets();
     
     set({ 
       project, 
@@ -68,15 +70,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     console.log("📁 Created new project:", project.meta.name);
   },
 
-  loadProject: (project: Project) => {
+  loadProject: async (project: Project) => {
     console.log("🔍 ProjectStore - Loading project:", project.meta.name);
     console.log("🔍 ProjectStore - Project assets:", project.assets);
     console.log("🔍 ProjectStore - Project assets length:", project.assets?.length || 0);
+    console.log("🔍 ProjectStore - Project tracks:", project.timeline.tracks);
+    console.log("🔍 ProjectStore - Project audio clips:", project.timeline.audioClips);
     
     const editorStore = useEditorStore.getState();
     
     // Update editor state with project data
-    editorStore.setScenes(project.timeline.scenes);
+    editorStore.setTracks(project.timeline.tracks || []);
+    editorStore.setScenes(project.timeline.scenes || []);
+    editorStore.setAudioClips(project.timeline.audioClips || []);
     editorStore.setDuration(project.settings.durationMs);
     editorStore.setFps(project.settings.fps as FrameRate);
     editorStore.setAspect(project.settings.aspect);
@@ -86,10 +92,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // Load assets into assets store
     if (project.assets && project.assets.length > 0) {
       console.log("🔍 ProjectStore - Loading assets into assets store:", project.assets.length);
-      useAssetsStore.getState().loadAssetsFromProject(project.assets);
+      await useAssetsStore.getState().loadAssetsFromProject(project.assets);
     } else {
       console.log("🔍 ProjectStore - No assets to load, clearing assets store");
-      useAssetsStore.getState().clearAssets();
+      await useAssetsStore.getState().clearAssets();
     }
     
     set({ 

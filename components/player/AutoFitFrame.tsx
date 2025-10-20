@@ -405,8 +405,10 @@ export function AutoFitFrame({ aspect, showGrid, showSafeArea, children }: Props
                onClick={handleOutsideClick}
              >
               {!current || !current.asset ? (
-                <div className="flex h-full items-center justify-center text-white/40 text-sm">
-                  {scenes.length ? "No media on current scene" : "Add media to the timeline to preview"}
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className="px-2 py-1 rounded-md bg-black/40 border border-white/10 text-[10px] text-white/60 backdrop-blur-sm">
+                    {scenes.length ? "No media on current scene" : "Add media to the timeline to preview"}
+                  </span>
                 </div>
               ) : (
                 <div className="relative h-full w-full">
@@ -505,10 +507,10 @@ export function AutoFitFrame({ aspect, showGrid, showSafeArea, children }: Props
 
         {/* Transport Controls - bottom center */}
         <div className="flex justify-center p-0">
-          <div className="flex items-center gap-1 bg-[var(--surface-primary)]/95 border border-[var(--border-primary)]/20 rounded px-2 py-0.5 backdrop-blur-md shadow-sm">
+          <div className="flex items-center gap-0.5 bg-[var(--surface-primary)]/95 border border-[var(--border-primary)]/20 rounded px-2 py-0 backdrop-blur-md shadow-sm h-6">
             <Button 
               aria-label="Back 1s" 
-              className="btn p-0.5 hover:bg-[var(--surface-secondary)]/50"
+              className="btn px-1 py-0 h-6 leading-none hover:bg-[var(--surface-secondary)]/50"
               onClick={() => nudgePlayhead(-1000)}
               suppressHydrationWarning
             >
@@ -516,7 +518,7 @@ export function AutoFitFrame({ aspect, showGrid, showSafeArea, children }: Props
             </Button>
             <Button 
               aria-label="Play/Pause" 
-              className={`btn p-0.5 ${isPlaying ? 'primary' : ''} hover:bg-[var(--surface-secondary)]/50`}
+              className={`btn px-1 py-0 h-6 leading-none ${isPlaying ? 'primary' : ''} hover:bg-[var(--surface-secondary)]/50`}
               onClick={togglePlayback}
               suppressHydrationWarning
             >
@@ -524,7 +526,7 @@ export function AutoFitFrame({ aspect, showGrid, showSafeArea, children }: Props
             </Button>
             <Button 
               aria-label="Forward 1s" 
-              className="btn p-0.5 hover:bg-[var(--surface-secondary)]/50"
+              className="btn px-1 py-0 h-6 leading-none hover:bg-[var(--surface-secondary)]/50"
               onClick={() => nudgePlayhead(1000)}
               suppressHydrationWarning
             >
@@ -533,10 +535,10 @@ export function AutoFitFrame({ aspect, showGrid, showSafeArea, children }: Props
           </div>
         </div>
 
-        {/* Time Counter - bottom left, matching controls height */}
-        <div className="absolute bottom-2 left-2 bg-[var(--surface-primary)]/90 border border-[var(--border-primary)]/30 rounded-md px-2 py-0.5 backdrop-blur-sm shadow-sm">
-          <div className="text-xs text-[var(--text-primary)] font-mono tracking-wide time-display">
-            {formatTime(playheadMs)} / {formatTime(durationMs)}
+        {/* Time Counter - bottom left, high contrast (keeps controls centered) */}
+        <div className="absolute bottom-1 left-2 bg-black/60 border border-white/15 rounded-md px-3 py-1 backdrop-blur-sm shadow-sm">
+          <div className="text-sm text-white font-mono tracking-wider">
+            {formatTime(playheadMs)} <span className="opacity-60">/</span> {formatTime(durationMs)}
           </div>
         </div>
 

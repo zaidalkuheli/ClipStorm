@@ -22,6 +22,8 @@ export type HistorySnapshot = {
     kind: "vo" | "music";
     gain?: number;
     originalDurationMs: number;
+    audioOffsetMs?: number;
+    trackId?: string;
   }[];
   durationMs: number;
   playheadMs: number;

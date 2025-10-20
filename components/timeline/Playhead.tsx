@@ -1,11 +1,13 @@
 "use client";
 import React from "react";
-import { useEditorStore } from "@/stores/editorStore";
+import { useEditorStore, SNAP_PX } from "@/stores/editorStore";
 
 export function Playhead({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement | null> }) {
   const playheadMs = useEditorStore(s => s.playheadMs);
   const pxPerSec = useEditorStore(s => s.pxPerSec);
   const setPlayhead = useEditorStore(s => s.setPlayhead);
+  const scenes = useEditorStore(s => s.scenes);
+  const audioClips = useEditorStore(s => s.audioClips);
 
   const x = (playheadMs / 1000) * pxPerSec;
 
@@ -13,13 +15,42 @@ export function Playhead({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElem
     const sc = scrollRef.current;
     if (!sc) return;
     const bounds = sc.getBoundingClientRect();
-    const toMs = (px: number) => {
-      const ms = ((px + sc.scrollLeft) / pxPerSec) * 1000;
-      return Math.max(0, ms); // Ensure never goes below 0
-    };
-    setPlayhead(toMs(clientX - bounds.left));
+    const pxToMs = (contentPx: number) => Math.max(0, ((contentPx + sc.scrollLeft) / pxPerSec) * 1000);
 
-    const onMove = (e: MouseEvent) => setPlayhead(toMs(e.clientX - bounds.left));
+    const snapIfClose = (contentPx: number) => {
+      // Candidate edges from both scenes and audio
+      let closestPxDiff = Infinity;
+      let snappedMs: number | null = null;
+
+      const considerEdge = (edgeMs: number) => {
+        const edgePx = (edgeMs / 1000) * pxPerSec - sc.scrollLeft; // content px relative to viewport left
+        const diff = Math.abs(edgePx - contentPx);
+        if (diff < closestPxDiff) {
+          closestPxDiff = diff;
+          snappedMs = edgeMs;
+        }
+      };
+
+      for (const s of scenes) {
+        considerEdge(s.startMs);
+        considerEdge(s.endMs);
+      }
+      for (const a of audioClips) {
+        considerEdge(a.startMs);
+        considerEdge(a.endMs);
+      }
+
+      // If within SNAP_PX, snap to that edge; otherwise free position
+      if (snappedMs != null && closestPxDiff <= SNAP_PX) {
+        return snappedMs;
+      }
+      return pxToMs(contentPx);
+    };
+
+    // Initial position
+    setPlayhead(snapIfClose(clientX - bounds.left));
+
+    const onMove = (e: MouseEvent) => setPlayhead(snapIfClose(e.clientX - bounds.left));
     const onUp = () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);

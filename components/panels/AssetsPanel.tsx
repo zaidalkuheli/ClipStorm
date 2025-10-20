@@ -19,6 +19,7 @@ interface MediaAsset {
   thumbnail?: string;
   addedAt: Date;
   file?: File; // Store the actual file for saving
+  isMissing?: boolean; // Flag for missing files
 }
 
 export function AssetsPanel() {
@@ -66,7 +67,13 @@ export function AssetsPanel() {
       }
 
       console.log("🔍 AssetsPanel - Adding asset:", asset);
-      addAsset(asset);
+      try {
+        await addAsset(asset);
+        console.log("✅ Asset added successfully:", asset.name);
+      } catch (error) {
+        console.error("❌ Failed to add asset:", error);
+        alert(`Failed to add ${file.name}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
     }
 
     // Reset input
@@ -85,11 +92,16 @@ export function AssetsPanel() {
 
   // Check if asset file exists (for red box display)
   const isAssetMissing = (asset: MediaAsset) => {
-    return !asset.file && !asset.url; // No file and no URL means missing
+    return asset.isMissing || (!asset.file && !asset.url); // Use isMissing flag or fallback to old logic
   };
 
   // Add asset to timeline
   const addToTimeline = (asset: MediaAsset) => {
+    if (isAssetMissing(asset)) {
+      alert(`Cannot add missing file "${asset.name}" to timeline. Please re-import this file.`);
+      return;
+    }
+    
     beginTx("Add asset to timeline");
     if (asset.type === "image" || asset.type === "video") {
       const dur = asset.type === "video" ? 5000 : 3000;
@@ -170,24 +182,28 @@ export function AssetsPanel() {
 
             {/* Assets Grid */}
             <div className="flex-1 overflow-y-auto">
-              <div className={`grid gap-2 ${viewMode === 'grid' ? 'grid-cols-4' : 'grid-cols-1'}`}>
+            <div className={`grid gap-2 ${viewMode === 'grid' ? 'grid-cols-3' : 'grid-cols-1'}`}>
                 {filteredAssets.map((asset) => (
                   <div
                     key={asset.id}
-                    draggable
+                    draggable={!isAssetMissing(asset)}
                     onDragStart={(e) => {
+                      if (isAssetMissing(asset)) {
+                        e.preventDefault();
+                        return;
+                      }
                       e.dataTransfer.setData("text/x-clipstorm-asset", JSON.stringify({ id: asset.id, type: asset.type }));
                       e.dataTransfer.effectAllowed = "copy";
                     }}
                     onDoubleClick={() => addToTimeline(asset)}
-                    className={`relative rounded-lg overflow-hidden hover:bg-[var(--surface-tertiary)] transition-colors group cursor-grab active:cursor-grabbing ${
+                    className={`relative rounded-lg overflow-hidden hover:bg-[var(--surface-tertiary)] transition-colors group ${
                       isAssetMissing(asset) 
-                        ? 'bg-red-500/20 border-2 border-red-500' 
-                        : 'bg-[var(--surface-secondary)]'
+                        ? 'bg-red-500/20 border-2 border-red-500 cursor-not-allowed' 
+                        : 'bg-[var(--surface-secondary)] cursor-grab active:cursor-grabbing'
                     }`}
                   >
                     {/* Asset Preview */}
-                    <div className={`relative ${viewMode === 'grid' ? 'aspect-square' : 'h-16'}`}>
+                    <div className={`relative ${viewMode === 'grid' ? 'aspect-[4/3]' : 'h-20'}`}>
                       {asset.type === 'image' && asset.url ? (
                         <img
                           src={asset.url}
@@ -218,9 +234,15 @@ export function AssetsPanel() {
                       
                       {/* Delete Button - Top Left */}
                       <button 
-                        onClick={(e) => {
+                        onClick={async (e) => {
                           e.stopPropagation();
-                          removeAsset(asset.id);
+                          try {
+                            await removeAsset(asset.id);
+                            console.log("✅ Asset removed successfully:", asset.name);
+                          } catch (error) {
+                            console.error("❌ Failed to remove asset:", error);
+                            alert(`Failed to remove ${asset.name}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                          }
                         }}
                         className="absolute top-1 left-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
                         title="Delete asset"

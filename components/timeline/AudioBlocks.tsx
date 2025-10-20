@@ -24,8 +24,12 @@ const AUDIO_COLORS = [
   { bg: "#be185d", border: "#ec4899", hover: "#be185d" }, // Pink
 ];
 
-export function AudioBlocks() {
-  const audioClips = useEditorStore(s => s.audioClips);
+export function AudioBlocks({ trackId }: { trackId?: string }) {
+  const allAudioClips = useEditorStore(s => s.audioClips);
+  const audioClips = React.useMemo(
+    () => trackId ? allAudioClips.filter(a => a.trackId === trackId) : allAudioClips,
+    [allAudioClips, trackId]
+  );
   const pxPerSec = useEditorStore(s => s.pxPerSec);
   const durationMs = useEditorStore(s => s.durationMs);
   const selectedAudioId = useEditorStore(s => s.selectedAudioId);
@@ -33,6 +37,7 @@ export function AudioBlocks() {
   const selectAudio = useEditorStore(s => s.selectAudio);
   const moveAudio = useEditorStore(s => s.moveAudio);
   const snapAnimationId = useEditorStore(s => s.snapAnimationId);
+  const moveAudioToTrack = useEditorStore(s => s.moveAudioToTrack);
   
   // Core editing actions
   const playheadMs = useEditorStore(s => s.playheadMs);
@@ -40,6 +45,11 @@ export function AudioBlocks() {
   const deleteSelection = useEditorStore(s => s.deleteSelection);
   const duplicateSelection = useEditorStore(s => s.duplicateSelection);
   const fps = useEditorStore(s => s.fps);
+  
+  const [dragPreview, setDragPreview] = useState<{
+    trackId: string | null;
+    isValid: boolean;
+  } | null>(null);
   
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
@@ -106,6 +116,8 @@ export function AudioBlocks() {
     id: string;
     startX: number;
     startMs: number;
+    startY: number;
+    isVerticalDrag: boolean;
   } | null>(null);
 
   // Simple and reliable auto-scroll
@@ -177,23 +189,14 @@ export function AudioBlocks() {
     const distanceFromLeft = clientX - rect.left;
     const distanceFromRight = rect.right - clientX;
     
-    console.log('🎵 AUTO-SCROLL CHECK:', {
-      clientX,
-      scrollLeft: scrollContainer.scrollLeft,
-      scrollWidth: scrollContainer.scrollWidth,
-      clientWidth: scrollContainer.clientWidth,
-      distanceFromLeft,
-      distanceFromRight,
-      threshold: AUTO_SCROLL_THRESHOLD
-    });
-    
     // Simple and reliable auto-scroll
     if (distanceFromLeft < AUTO_SCROLL_THRESHOLD) {
-      console.log('🎵 Starting LEFT auto-scroll');
       startAutoScroll('left');
     } else if (distanceFromRight < AUTO_SCROLL_THRESHOLD) {
-      console.log('🎵 Starting RIGHT auto-scroll');
       startAutoScroll('right');
+    } else {
+      // Not near edges while dragging → stop auto-scroll immediately
+      stopAutoScroll();
     }
     // Keep scrolling until drag ends
   };
@@ -209,7 +212,6 @@ export function AudioBlocks() {
     
     dragRef.current = { id, edge };
     document.body.style.cursor = "ew-resize";
-    console.log('🎵 Starting smooth audio drag:', { id, edge, audioIndex: audioClips.findIndex(a => a.id === id) });
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -223,11 +225,20 @@ export function AudioBlocks() {
     // Check for auto-scroll during any drag operation - professional smooth audio trimming
     if (d || m) {
       checkAutoScroll(e.clientX);
+    } else {
+      // If not dragging, ensure auto-scroll is stopped
+      stopAutoScroll();
     }
 
     // Handle resize dragging
     if (d) {
-      const targetMs = Math.max(0, (contentX / pxPerSec) * 1000);
+      // Snap audio edge to playhead if close
+      const rawMs = Math.max(0, (contentX / pxPerSec) * 1000);
+      const playheadMs = useEditorStore.getState().playheadMs;
+      const playheadPx = (playheadMs / 1000) * pxPerSec;
+      const edgePx = contentX;
+      const snapPx = 8;
+      const targetMs = Math.abs(edgePx - playheadPx) <= snapPx ? playheadMs : rawMs;
 
       // throttle to one store update per frame
       if (rafRef.current == null) {
@@ -241,15 +252,59 @@ export function AudioBlocks() {
     // Handle move dragging
     if (m) {
       const deltaX = contentX - m.startX;
-      const deltaMs = (deltaX / pxPerSec) * 1000;
-      const newStartMs = Math.max(0, m.startMs + deltaMs);
+      const deltaY = e.clientY - m.startY;
+      
+      // Detect if this is a vertical drag (moving between tracks)
+      if (!m.isVerticalDrag && Math.abs(deltaY) > 10 && Math.abs(deltaX) < 20) {
+        m.isVerticalDrag = true;
+      }
+      
+      if (m.isVerticalDrag) {
+        // Handle vertical drag - find target track
+        const tracks = useEditorStore.getState().tracks;
+        const currentAudio = audioClips.find(a => a.id === m.id);
+        if (!currentAudio) return;
+        
+        const currentTrack = tracks.find(t => t.id === currentAudio.trackId);
+        if (!currentTrack) return;
+        
+        // Find target track based on Y position
+        const trackElements = document.querySelectorAll('[data-track-id]');
+        let targetTrackId = currentTrack.id;
+        
+        for (const trackEl of trackElements) {
+          const rect = trackEl.getBoundingClientRect();
+          if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
+            targetTrackId = trackEl.getAttribute('data-track-id') || currentTrack.id;
+            break;
+          }
+        }
+        
+        // Move to target track if different and compatible
+        if (targetTrackId !== currentTrack.id) {
+          const targetTrack = tracks.find(t => t.id === targetTrackId);
+          if (targetTrack && targetTrack.type === 'audio') {
+            moveAudioToTrack(m.id, targetTrackId);
+            m.startY = e.clientY; // Reset Y to prevent continuous switching
+            setDragPreview({ trackId: targetTrackId, isValid: true });
+          } else {
+            setDragPreview({ trackId: targetTrackId, isValid: false });
+          }
+        } else {
+          setDragPreview(null);
+        }
+      } else {
+        // Handle horizontal drag
+        const deltaMs = (deltaX / pxPerSec) * 1000;
+        const newStartMs = Math.max(0, m.startMs + deltaMs);
 
-      // throttle to one store update per frame
-      if (rafRef.current == null) {
-        rafRef.current = requestAnimationFrame(() => {
-          moveAudio(m.id, newStartMs, pxPerSec);
-          rafRef.current = null;
-        });
+        // throttle to one store update per frame
+        if (rafRef.current == null) {
+          rafRef.current = requestAnimationFrame(() => {
+            moveAudio(m.id, newStartMs, pxPerSec);
+            rafRef.current = null;
+          });
+        }
       }
     }
   };
@@ -270,8 +325,12 @@ export function AudioBlocks() {
 
       // final snap on release using zoom-aware grid
       const contentX = getContentX(e);
-      const finalTargetMs = Math.max(0, (contentX / pxPerSec) * 1000);
-      console.log('🎵 Final snap:', { finalTargetMs, gridMs: gridMsFromZoom() });
+      const playheadMs = useEditorStore.getState().playheadMs;
+      const playheadPx = (playheadMs / 1000) * pxPerSec;
+      const edgePx = contentX;
+      const snapPx = 8;
+      const rawFinal = Math.max(0, (contentX / pxPerSec) * 1000);
+      const finalTargetMs = Math.abs(edgePx - playheadPx) <= snapPx ? playheadMs : rawFinal;
       resizeAudioTo(d.id, d.edge, finalTargetMs, MIN_MS, gridMsFromZoom(), pxPerSec);
       
       // Commit transaction
@@ -283,19 +342,40 @@ export function AudioBlocks() {
       moveDragRef.current = null;
       document.body.style.cursor = "";
       stopAutoScroll();
+      setDragPreview(null); // Clear drag preview
       
       const contentX = getContentX(e);
       const deltaX = contentX - m.startX;
       const deltaMs = (deltaX / pxPerSec) * 1000;
       const finalStartMs = Math.max(0, m.startMs + deltaMs);
       
-      console.log('🎵 Final move:', { finalStartMs, gridMs: gridMsFromZoom() });
       moveAudio(m.id, finalStartMs, pxPerSec);
       
       // Commit transaction
       commitTx();
     }
   };
+
+  // Stop auto-scroll when pointer leaves the track area or component unmounts
+  const onPointerLeave = () => {
+    stopAutoScroll();
+  };
+
+  React.useEffect(() => {
+    const handleDocPointerUp = () => stopAutoScroll();
+    const handleVisibility = () => {
+      if (document.hidden) stopAutoScroll();
+    };
+    document.addEventListener('pointerup', handleDocPointerUp);
+    document.addEventListener('pointercancel', handleDocPointerUp);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      document.removeEventListener('pointerup', handleDocPointerUp);
+      document.removeEventListener('pointercancel', handleDocPointerUp);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      stopAutoScroll();
+    };
+  }, []);
 
   const onAudioClick = (e: React.MouseEvent, audioId: string) => {
     e.stopPropagation();
@@ -317,11 +397,12 @@ export function AudioBlocks() {
     moveDragRef.current = {
       id: audioId,
       startX: getContentX(e),
-      startMs: audio.startMs
+      startMs: audio.startMs,
+      startY: e.clientY,
+      isVerticalDrag: false
     };
     
     document.body.style.cursor = "grabbing";
-    console.log('🎵 Starting audio move:', { audioId, startMs: audio.startMs });
   };
 
   return (
@@ -333,15 +414,7 @@ export function AudioBlocks() {
       onPointerCancel={onPointerUp}
     >
       <div className="relative h-full" style={{ width: Math.max(1, msToPx(durationMs)) }}>
-        {audioClips.length === 0 ? (
-          // Empty state - clean and minimal
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-center">
-              <div className="text-xs text-[var(--text-tertiary)] mb-1">No audio yet</div>
-              <div className="text-xs text-[var(--text-tertiary)]">Drag audio files here</div>
-            </div>
-          </div>
-        ) : (
+        {audioClips.length === 0 ? null : (
           audioClips.map((a, index) => {
           const left = msToPx(a.startMs);
           const width = msToPx(a.endMs - a.startMs);
