@@ -301,7 +301,7 @@ export function AppHeader() {
             </div>
             
             {/* Project Menu - moved next to title */}
-            <div className="relative project-menu-container">
+            <div className="relative project-menu-container select-none">
               <Button 
                 ref={projectButtonRef}
                 variant="ghost" 

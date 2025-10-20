@@ -149,8 +149,21 @@ export function AssetsPanel() {
             placeholder="Search"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-7 pr-2 py-1 bg-[var(--surface-primary)] border border-[var(--border-primary)] rounded-sm text-xs text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent-cool)]"
+            onKeyDown={(e) => { if (e.key === 'Escape') setSearchQuery(''); }}
+            aria-label="Search assets"
+            className="w-full pl-7 pr-6 py-1 bg-[var(--surface-primary)] border border-[var(--border-primary)] rounded-sm text-xs text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent-cool)]"
           />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery("")}
+              className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 rounded text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+              aria-label="Clear search"
+              title="Clear"
+            >
+              ×
+            </button>
+          )}
         </div>
 
         {/* Hidden File Input */}

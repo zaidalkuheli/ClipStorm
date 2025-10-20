@@ -7,6 +7,7 @@ import { InspectorPanel } from "@/components/panels/InspectorPanel";
 import { Timeline } from "@/components/timeline/Timeline";
 import { ClientOnly } from "@/components/ui/ClientOnly";
 import { useProjectStore } from "@/stores/projectStore";
+import { useEditorStore } from "@/stores/editorStore";
 
 /**
  * ResizableShell - Main layout component with persistent panel sizing
@@ -37,6 +38,10 @@ function ResizableShellContent() {
   
   // Project store for dirty state protection
   const dirty = useProjectStore(s => s.dirty);
+  const selectedSceneId = useEditorStore(s => s.selectedSceneId);
+  const selectedAudioId = useEditorStore(s => s.selectedAudioId);
+  const hasSelection = !!(selectedSceneId || selectedAudioId);
+  const prevInspectorSizeRef = React.useRef<number>(15);
 
   // Dirty state protection - warn on unload
   React.useEffect(() => {
@@ -85,6 +90,8 @@ function ResizableShellContent() {
     localStorage.setItem("cs:layout:v", JSON.stringify(layout));
   }, []);
 
+  // Keep layout stable; do not auto-resize preview when selection changes
+
   return (
     <div className="h-[calc(100vh-32px)] w-screen">
       <PanelGroup
@@ -103,7 +110,13 @@ function ResizableShellContent() {
             <PanelResizeHandle className="ResizeHandle" />
             <Panel minSize={50}><PreviewPanel /></Panel>
             <PanelResizeHandle className="ResizeHandle" />
-            <Panel minSize={10}><InspectorPanel /></Panel>
+            <Panel minSize={10}>
+              {hasSelection ? (
+                <InspectorPanel />
+              ) : (
+                <div className="h-full w-full bg-[var(--surface-primary)]" />
+              )}
+            </Panel>
           </PanelGroup>
         </Panel>
 

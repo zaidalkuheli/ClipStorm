@@ -507,7 +507,7 @@ export function AutoFitFrame({ aspect, showGrid, showSafeArea, children }: Props
 
         {/* Transport Controls - bottom center */}
         <div className="flex justify-center p-0">
-          <div className="flex items-center gap-0.5 bg-[var(--surface-primary)]/95 border border-[var(--border-primary)]/20 rounded px-2 py-0 backdrop-blur-md shadow-sm h-6">
+          <div className="flex items-center gap-0.5 bg-[var(--surface-primary)]/95 border border-[var(--border-primary)]/20 rounded px-2 py-0 backdrop-blur-md shadow-sm h-6 select-none">
             <Button 
               aria-label="Back 1s" 
               className="btn px-1 py-0 h-6 leading-none hover:bg-[var(--surface-secondary)]/50"

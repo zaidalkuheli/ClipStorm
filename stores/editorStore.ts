@@ -115,6 +115,8 @@ interface EditorState {
   
   // audio
   audioClips: AudioClip[];
+  setAudioGain: (id: string, gain: number) => void;
+  toggleAudioMute: (id: string) => void;
   
   // history
   history: History;
@@ -244,6 +246,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   // audio
   audioClips: [],
   selectedAudioId: null,
+  setAudioGain: (id, gain) => set(state => ({
+    audioClips: state.audioClips.map(a => a.id === id ? { ...a, gain: bounds(gain, 0, 1) } : a)
+  })),
+  toggleAudioMute: (id) => set(state => ({
+    audioClips: state.audioClips.map(a => a.id === id ? { ...a, gain: (a.gain ?? 1) > 0 ? 0 : 1 } : a)
+  })),
   
   // history
   history: { past: [], future: [], inTx: false, max: 100 },

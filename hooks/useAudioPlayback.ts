@@ -29,6 +29,8 @@ export function useAudioPlayback() {
     const audio = new Audio(asset.url);
     audio.preload = 'metadata';
     audio.loop = false;
+    // Initialize volume from clip gain (0..1)
+    audio.volume = Math.max(0, Math.min(1, clip.gain ?? 1));
     audioElementsRef.current.set(clip.id, audio);
     return audio;
   };
@@ -70,6 +72,12 @@ export function useAudioPlayback() {
         assetId: clip.assetId,
         isPlaying: isPlaying
       });
+
+      // Apply volume/mute from clip gain (0..1)
+      const volume = Math.max(0, Math.min(1, clip.gain ?? 1));
+      if (audio.volume !== volume) {
+        audio.volume = volume;
+      }
 
       // Set audio time and play if timeline is playing
       if (Math.abs(audio.currentTime - audioTimeSeconds) > 0.1) {

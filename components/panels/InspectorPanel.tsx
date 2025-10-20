@@ -28,7 +28,7 @@ export function InspectorPanel() {
   return (
     <Panel title="Inspector" className="h-full">
       {/* Sticky summary header */}
-      <div className="sticky top-0 z-10 -mx-2 -mt-2 px-2 pt-2 pb-1 bg-[var(--surface-primary)]/60 backdrop-blur-sm border-b border-[var(--border-primary)]">
+      <div className="sticky top-0 z-10 -mx-2 -mt-2 px-2 pt-2 pb-1 bg-[var(--surface-primary)]/60 backdrop-blur-sm border-b border-[var(--border-primary)] select-none">
         {selection ? (
           <div className="flex items-center justify-between">
             <div>
@@ -44,10 +44,44 @@ export function InspectorPanel() {
         )}
       </div>
 
-      {/* Minimal placeholder content only; avoids taking space until real controls land */}
-      <div className="flex-1 h-full flex items-center justify-center text-[10px] text-[var(--text-tertiary)]">
-        {selection ? 'Controls will appear here.' : 'Select an item to inspect.'}
-      </div>
+      {/* Minimal content: show audio controls when audio selected; otherwise tiny hint */}
+      {selectedAudio ? (
+        <div className="flex-1 min-h-0 overflow-auto pt-2">
+          <div className="space-y-3">
+            {/* Volume */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-[var(--text-secondary)]">Volume</span>
+                <span className="text-[10px] text-[var(--text-tertiary)]">{Math.round(((selectedAudio.gain ?? 1) * 100))}%</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round((selectedAudio.gain ?? 1) * 100)}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  useEditorStore.getState().setAudioGain(selectedAudio.id, v / 100);
+                }}
+                className="w-full"
+              />
+            </div>
+            {/* Mute */}
+            <label className="flex items-center justify-between p-2 border border-[var(--border-primary)] rounded-md bg-[var(--surface-secondary)]/60 cursor-pointer select-none">
+              <span className="text-xs text-[var(--text-secondary)]">Mute</span>
+              <input
+                type="checkbox"
+                checked={(selectedAudio.gain ?? 1) === 0}
+                onChange={() => useEditorStore.getState().toggleAudioMute(selectedAudio.id)}
+              />
+            </label>
+          </div>
+        </div>
+      ) : (
+        <div className="flex-1 h-full flex items-center justify-center text-[10px] text-[var(--text-tertiary)]">
+          Select an item to inspect.
+        </div>
+      )}
     </Panel>
   );
 }
