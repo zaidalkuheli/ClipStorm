@@ -146,10 +146,30 @@ export function useAudioPlayback() {
         isPlaying: isPlaying
       });
 
-      // Apply volume/mute from clip gain (0..1)
-      const volume = Math.max(0, Math.min(1, clip.gain ?? 1));
-      if (audio.volume !== volume) {
-        audio.volume = volume;
+      // Apply volume/mute from clip gain and fade curves
+      const baseVolume = Math.max(0, Math.min(1, clip.gain ?? 1));
+      
+      // Calculate fade curve based on current time within clip
+      const clipDurationMs = clip.endMs - clip.startMs;
+      let fadeMultiplier = 1;
+      
+      // Apply fade in curve
+      if (clip.fadeInMs && clip.fadeInMs > 0 && localTimeMs < clip.fadeInMs) {
+        fadeMultiplier *= localTimeMs / clip.fadeInMs; // Linear fade in
+        console.log('🎵 Fade In:', { localTimeMs, fadeInMs: clip.fadeInMs, fadeMultiplier });
+      }
+      
+      // Apply fade out curve
+      if (clip.fadeOutMs && clip.fadeOutMs > 0 && localTimeMs > (clipDurationMs - clip.fadeOutMs)) {
+        const fadeOutProgress = (clipDurationMs - localTimeMs) / clip.fadeOutMs;
+        fadeMultiplier *= fadeOutProgress; // Linear fade out
+        console.log('🎵 Fade Out:', { localTimeMs, fadeOutMs: clip.fadeOutMs, fadeOutProgress, fadeMultiplier });
+      }
+      
+      const finalVolume = baseVolume * fadeMultiplier;
+      if (audio.volume !== finalVolume) {
+        audio.volume = finalVolume;
+        console.log('🎵 Volume Update:', { baseVolume, fadeMultiplier, finalVolume });
       }
 
       // Set audio time and play if timeline is playing

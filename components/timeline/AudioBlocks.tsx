@@ -38,6 +38,8 @@ export function AudioBlocks({ trackId }: { trackId?: string }) {
   const moveAudio = useEditorStore(s => s.moveAudio);
   const snapAnimationId = useEditorStore(s => s.snapAnimationId);
   const moveAudioToTrack = useEditorStore(s => s.moveAudioToTrack);
+  const setAudioFadeIn = useEditorStore(s => s.setAudioFadeIn);
+  const setAudioFadeOut = useEditorStore(s => s.setAudioFadeOut);
   
   // Core editing actions
   const playheadMs = useEditorStore(s => s.playheadMs);
@@ -214,25 +216,121 @@ export function AudioBlocks({ trackId }: { trackId?: string }) {
     document.body.style.cursor = "ew-resize";
   };
 
+  // Initialize fade handles on double-click
+  const initializeFades = (audioId: string) => {
+    const audioClip = audioClips.find(a => a.id === audioId);
+    if (!audioClip) return;
+    
+    const clipDurationMs = audioClip.endMs - audioClip.startMs;
+    const defaultFadeMs = Math.min(500, clipDurationMs * 0.1); // 0.5s or 10% of clip, whichever is smaller
+    
+    // Set default fade in/out if not already set
+    if (!audioClip.fadeInMs) {
+      setAudioFadeIn(audioId, defaultFadeMs);
+    }
+    if (!audioClip.fadeOutMs) {
+      setAudioFadeOut(audioId, defaultFadeMs);
+    }
+  };
+
+  const fadeDragRef = React.useRef<{
+    id: string;
+    fadeType: "fadeIn" | "fadeOut";
+    startX: number;
+    startFadeMs: number;
+  } | null>(null);
+
+  const onFadeHandlePointerDown = (e: React.PointerEvent, id: string, fadeType: "fadeIn" | "fadeOut") => {
+    if (!containerRef.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    
+    // Begin transaction for fade adjustment
+    beginTx(`Adjust ${fadeType}`);
+    
+    // Find the audio clip to get its current fade values
+    const audioClip = audioClips.find(a => a.id === id);
+    if (!audioClip) return;
+    
+    // Store fade-specific drag reference (separate from resize)
+    fadeDragRef.current = { 
+      id, 
+      fadeType,
+      startX: e.clientX,
+      startFadeMs: fadeType === 'fadeIn' ? (audioClip.fadeInMs || 0) : (audioClip.fadeOutMs || 0)
+    };
+    
+    document.body.style.cursor = "ew-resize";
+    
+    // Add global pointer up listener to handle release outside track
+    const handleGlobalPointerUp = () => {
+      if (fadeDragRef.current) {
+        fadeDragRef.current = null;
+        document.body.style.cursor = "";
+        commitTx();
+        document.removeEventListener('pointerup', handleGlobalPointerUp);
+      }
+    };
+    
+    document.addEventListener('pointerup', handleGlobalPointerUp);
+    
+    console.log('🎵 Fade handle drag started:', { id, fadeType, startFadeMs: fadeDragRef.current.startFadeMs });
+  };
+
   const onPointerMove = (e: React.PointerEvent) => {
     const d = dragRef.current;
     const m = moveDragRef.current;
+    const f = fadeDragRef.current;
     
     if (!containerRef.current) return;
 
     const contentX = getContentX(e);
 
-    // Check for auto-scroll during any drag operation - professional smooth audio trimming
-    if (d || m) {
+    // Check for auto-scroll during any drag operation
+    if (d || m || f) {
       checkAutoScroll(e.clientX);
     } else {
-      // If not dragging, ensure auto-scroll is stopped
       stopAutoScroll();
     }
 
-    // Handle resize dragging
+    // Handle fade dragging (separate from resize)
+    if (f) {
+      const audioClip = audioClips.find(a => a.id === f.id);
+      if (!audioClip) return;
+      
+      const clipStartPx = msToPx(audioClip.startMs);
+      const clipEndPx = msToPx(audioClip.endMs);
+      const clipWidthPx = clipEndPx - clipStartPx;
+      
+      let newFadeMs = 0;
+      
+      if (f.fadeType === 'fadeIn') {
+        // Fade in: distance from left edge of clip
+        const fadePx = Math.max(0, Math.min(contentX - clipStartPx, clipWidthPx));
+        newFadeMs = (fadePx / pxPerSec) * 1000;
+      } else if (f.fadeType === 'fadeOut') {
+        // Fade out: distance from right edge of clip
+        const fadePx = Math.max(0, Math.min(clipEndPx - contentX, clipWidthPx));
+        newFadeMs = (fadePx / pxPerSec) * 1000;
+      }
+      
+      // throttle to one store update per frame
+      if (rafRef.current == null) {
+        rafRef.current = requestAnimationFrame(() => {
+          if (f.fadeType === 'fadeIn') {
+            setAudioFadeIn(f.id, newFadeMs);
+          } else if (f.fadeType === 'fadeOut') {
+            setAudioFadeOut(f.id, newFadeMs);
+          }
+          rafRef.current = null;
+        });
+      }
+      return; // Don't process resize logic
+    }
+
+    // Handle regular resize (left/right edges)
     if (d) {
-      // Snap audio edge to playhead if close
       const rawMs = Math.max(0, (contentX / pxPerSec) * 1000);
       const playheadMs = useEditorStore.getState().playheadMs;
       const playheadPx = (playheadMs / 1000) * pxPerSec;
@@ -312,11 +410,20 @@ export function AudioBlocks({ trackId }: { trackId?: string }) {
   const onPointerUp = (e: React.PointerEvent) => {
     const d = dragRef.current;
     const m = moveDragRef.current;
+    const f = fadeDragRef.current;
     
     if (!containerRef.current) return;
 
     // Stop auto-scroll on pointer up
     stopAutoScroll();
+
+    // Handle fade drag end
+    if (f) {
+      fadeDragRef.current = null;
+      document.body.style.cursor = "";
+      commitTx();
+      return; // Don't process other drag types
+    }
 
     // Handle resize end
     if (d) {
@@ -460,6 +567,11 @@ export function AudioBlocks({ trackId }: { trackId?: string }) {
               title={`${asset?.name || a.kind} • ${((a.endMs - a.startMs)/1000).toFixed(2)}s`}
               draggable={false}
               onClick={(e) => onAudioClick(e, a.id)}
+              onDoubleClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                initializeFades(a.id);
+              }}
               onContextMenu={(e) => {
                 e.preventDefault();
                 setContextMenu({
@@ -476,15 +588,15 @@ export function AudioBlocks({ trackId }: { trackId?: string }) {
               {/* Waveform Canvas */}
               <WaveformCanvas clip={a} pxPerSec={pxPerSec} height={40} />
 
-              {/* wider, touch-friendly handles with higher z-index */}
+              {/* smaller, precise resize handles */}
               <div
-                className={clsx("absolute left-0 top-0 h-full w-4 cursor-ew-resize bg-white/0 hover:bg-white/10 handle z-20 transition-colors", {
+                className={clsx("absolute left-0 top-0 h-full w-2 cursor-ew-resize bg-white/0 hover:bg-white/20 handle z-50 transition-colors", {
                   "pl-0": isFirstBlock // ensure first block's left handle is fully accessible
                 })}
                 onPointerDown={(e)=>onPointerDown(e, a.id, "left")}
               />
               <div
-                className={clsx("absolute right-0 top-0 h-full w-4 cursor-ew-resize bg-white/0 hover:bg-white/10 handle z-20 transition-colors", {
+                className={clsx("absolute right-0 top-0 h-full w-2 cursor-ew-resize bg-white/0 hover:bg-white/20 handle z-50 transition-colors", {
                   "pr-0": isLastBlock // ensure last block's right handle is fully accessible
                 })}
                 onPointerDown={(e)=>onPointerDown(e, a.id, "right")}
@@ -495,6 +607,73 @@ export function AudioBlocks({ trackId }: { trackId?: string }) {
                 {asset?.name ? asset.name.length > 25 ? asset.name.substring(0, 22) + '...' : asset.name : a.kind}
               </div>
 
+              {/* Fade In Handle */}
+              {a.fadeInMs && a.fadeInMs > 0 && (
+                <div
+                  className="absolute left-0 top-0 h-full z-30 pointer-events-none"
+                  style={{ width: Math.max(8, msToPx(a.fadeInMs)) }}
+                >
+                  {/* Fade triangle - softer black fade in curve */}
+                  <div 
+                    className="absolute right-0 top-0 h-full bg-black/60 pointer-events-none"
+                    style={{ 
+                      width: Math.max(8, msToPx(a.fadeInMs)),
+                      clipPath: 'polygon(0 0, 100% 0, 0 100%)'
+                    }}
+                  />
+                  {/* Bold black arrow handle - closer to edge */}
+                  <div 
+                    className="absolute top-0 w-3 h-3 cursor-ew-resize z-30 pointer-events-auto flex items-center justify-center"
+                    style={{ 
+                      left: `${Math.max(8, msToPx(a.fadeInMs)) - 1}px`
+                    }}
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onFadeHandlePointerDown(e, a.id, 'fadeIn');
+                    }}
+                  >
+                    {/* Thick black right arrow */}
+                    <svg width="6" height="6" viewBox="0 0 6 6" fill="none" className="text-black">
+                      <path d="M1 1L5 3L1 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </div>
+                </div>
+              )}
+
+              {/* Fade Out Handle */}
+              {a.fadeOutMs && a.fadeOutMs > 0 && (
+                <div
+                  className="absolute right-0 top-0 h-full z-30 pointer-events-none"
+                  style={{ width: Math.max(8, msToPx(a.fadeOutMs)) }}
+                >
+                  {/* Fade triangle - softer black fade out curve */}
+                  <div 
+                    className="absolute left-0 top-0 h-full bg-black/60 pointer-events-none"
+                    style={{ 
+                      width: Math.max(8, msToPx(a.fadeOutMs)),
+                      clipPath: 'polygon(0 0, 100% 0, 100% 100%)'
+                    }}
+                  />
+                  {/* Bold black arrow handle - closer to edge */}
+                  <div 
+                    className="absolute top-0 w-3 h-3 cursor-ew-resize z-30 pointer-events-auto flex items-center justify-center"
+                    style={{ 
+                      right: `${Math.max(8, msToPx(a.fadeOutMs)) - 1}px`
+                    }}
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onFadeHandlePointerDown(e, a.id, 'fadeOut');
+                    }}
+                  >
+                    {/* Thick black left arrow */}
+                    <svg width="6" height="6" viewBox="0 0 6 6" fill="none" className="text-black">
+                      <path d="M5 1L1 3L5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </div>
+                </div>
+              )}
 
               {/* Magnetic linking visual indicators */}
               <span className={clsx("audio-edge left", magnetLeft && "magnet-on", isSnapping && "snap-animation")} />

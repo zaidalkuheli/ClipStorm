@@ -81,6 +81,8 @@ export type Scene = {
   // Audio control for video scenes
   gain?: number; // Volume level (0..1)
   muted?: boolean; // Mute state
+  // Video duration constraint
+  originalDurationMs?: number; // Store the original video file duration
 };
 
 export type AudioClip = {
@@ -93,6 +95,9 @@ export type AudioClip = {
   originalDurationMs: number; // Store the original audio file duration
   audioOffsetMs?: number; // Offset within the original audio file (for cut clips)
   trackId?: string; // Track assignment for vertical drag
+  // Fade controls
+  fadeInMs?: number; // fade in duration in milliseconds
+  fadeOutMs?: number; // fade out duration in milliseconds
 };
 export type AspectRatio = "9:16" | "1:1" | "16:9";
 export type Resolution = "1080x1920" | "720x1280";
@@ -122,6 +127,8 @@ interface EditorState {
   audioClips: AudioClip[];
   setAudioGain: (id: string, gain: number) => void;
   toggleAudioMute: (id: string) => void;
+  setAudioFadeIn: (id: string, fadeInMs: number) => void;
+  setAudioFadeOut: (id: string, fadeOutMs: number) => void;
   setSceneGain: (id: string, gain: number) => void;
   toggleSceneMute: (id: string) => void;
   
@@ -260,6 +267,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   })),
   toggleAudioMute: (id) => set(state => ({
     audioClips: state.audioClips.map(a => a.id === id ? { ...a, gain: (a.gain ?? 1) > 0 ? 0 : 1 } : a)
+  })),
+  setAudioFadeIn: (id, fadeInMs) => set(state => ({
+    audioClips: state.audioClips.map(a => a.id === id ? { ...a, fadeInMs: Math.max(0, fadeInMs) } : a)
+  })),
+  setAudioFadeOut: (id, fadeOutMs) => set(state => ({
+    audioClips: state.audioClips.map(a => a.id === id ? { ...a, fadeOutMs: Math.max(0, fadeOutMs) } : a)
   })),
   setSceneGain: (id, gain) => set(state => ({
     scenes: state.scenes.map(s => s.id === id ? { ...s, gain: bounds(gain, 0, 1) } : s)
@@ -515,6 +528,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
         const cur = sortedScenes[i];
         
+        // Get asset information to determine if this is a video or image
+        const asset = cur.assetId ? useAssetsStore.getState().getById(cur.assetId) : null;
+        
         // Only consider scenes in the same track for magnetic linking
         const scenesInSameTrack = sortedScenes.filter(sc => sc.trackId === cur.trackId);
         const iInTrack = scenesInSameTrack.findIndex(sc => sc.id === id);
@@ -524,13 +540,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         const snapMs = pxToMs(SNAP_PX, pxPerSec);
         const unlinkMs = pxToMs(UNLINK_PX, pxPerSec);
 
+        // Use the stored original duration to constrain resizing (like audio blocks)
+        // Only apply duration constraints for videos, not images (images can be resized unlimited)
+        const maxDurationMs = (asset?.type === 'video' && cur.originalDurationMs) ? cur.originalDurationMs : Infinity;
+
         if (edge === "left") {
           const low  = prev ? (prev.startMs + minMs) : 0;
           const high = cur.endMs - minMs;
+          // Don't exceed original video duration - use original duration, not current
+          const maxStartMs = cur.endMs - maxDurationMs;
 
           // snap, then clamp
           let newStart = snapToGrid(targetMs, gridMs);
-          newStart = bounds(newStart, low, high);
+          newStart = bounds(newStart, Math.max(low, maxStartMs), high);
 
           const wasLinked = !!cur.linkLeftId && prev && cur.linkLeftId === prev.id;
 
@@ -565,9 +587,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           const low  = cur.startMs + minMs;
           // IMPORTANT: use next.end for upper bound so it doesn't collapse while trimming
           const high = next ? (next.endMs - minMs) : Number.MAX_SAFE_INTEGER;
+          // Don't exceed original video duration - use original duration, not current
+          const maxEndMs = cur.startMs + maxDurationMs;
 
           let newEnd = snapToGrid(targetMs, gridMs);
-          newEnd = bounds(newEnd, low, high);
+          newEnd = bounds(newEnd, low, Math.min(high, maxEndMs));
 
           const wasLinked = !!cur.linkRightId && next && cur.linkRightId === next.id;
 
@@ -902,7 +926,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       assetId, 
       trackId: defaultTrack.id,
       linkLeftId: null, 
-      linkRightId: null 
+      linkRightId: null,
+      // Only set originalDurationMs for videos, not images (images can be resized unlimited)
+      ...(asset?.type === 'video' ? { originalDurationMs: dflt } : {})
     };
     
     console.log('🎬 FINAL SCENE CREATION:', { 

@@ -79,6 +79,82 @@ export function InspectorPanel() {
                 className="h-4 w-4 rounded border-[var(--border-primary)] bg-[var(--surface-primary)] text-[var(--accent-cool)] focus:ring-[var(--accent-cool)] focus:ring-2"
               />
             </label>
+
+            {/* Fade In */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-[var(--text-secondary)] font-medium">Fade In</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min={0}
+                    max={5}
+                    step={0.1}
+                    value={((selectedAudio.fadeInMs ?? 0) / 1000).toFixed(1)}
+                    onChange={(e) => {
+                      const seconds = Number(e.target.value);
+                      const ms = Math.round(seconds * 1000);
+                      useEditorStore.getState().setAudioFadeIn(selectedAudio.id, ms);
+                    }}
+                    className="w-12 h-5 text-[10px] text-center bg-[var(--surface-primary)] border border-[var(--border-primary)] rounded px-1"
+                  />
+                  <span className="text-[10px] text-[var(--text-tertiary)]">s</span>
+                </div>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={5000}
+                step={50}
+                value={selectedAudio.fadeInMs ?? 0}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  useEditorStore.getState().setAudioFadeIn(selectedAudio.id, v);
+                }}
+                className="w-full h-2 bg-[var(--surface-primary)] rounded-lg appearance-none cursor-pointer slider"
+                style={{
+                  background: `linear-gradient(to right, var(--accent-cool) 0%, var(--accent-cool) ${Math.round(((selectedAudio.fadeInMs ?? 0) / 5000) * 100)}%, var(--surface-primary) ${Math.round(((selectedAudio.fadeInMs ?? 0) / 5000) * 100)}%, var(--surface-primary) 100%)`
+                }}
+              />
+            </div>
+
+            {/* Fade Out */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-[var(--text-secondary)] font-medium">Fade Out</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min={0}
+                    max={5}
+                    step={0.1}
+                    value={((selectedAudio.fadeOutMs ?? 0) / 1000).toFixed(1)}
+                    onChange={(e) => {
+                      const seconds = Number(e.target.value);
+                      const ms = Math.round(seconds * 1000);
+                      useEditorStore.getState().setAudioFadeOut(selectedAudio.id, ms);
+                    }}
+                    className="w-12 h-5 text-[10px] text-center bg-[var(--surface-primary)] border border-[var(--border-primary)] rounded px-1"
+                  />
+                  <span className="text-[10px] text-[var(--text-tertiary)]">s</span>
+                </div>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={5000}
+                step={50}
+                value={selectedAudio.fadeOutMs ?? 0}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  useEditorStore.getState().setAudioFadeOut(selectedAudio.id, v);
+                }}
+                className="w-full h-2 bg-[var(--surface-primary)] rounded-lg appearance-none cursor-pointer slider"
+                style={{
+                  background: `linear-gradient(to right, var(--accent-cool) 0%, var(--accent-cool) ${Math.round(((selectedAudio.fadeOutMs ?? 0) / 5000) * 100)}%, var(--surface-primary) ${Math.round(((selectedAudio.fadeOutMs ?? 0) / 5000) * 100)}%, var(--surface-primary) 100%)`
+                }}
+              />
+            </div>
           </div>
         </div>
       ) : selectedScene ? (

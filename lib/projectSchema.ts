@@ -38,6 +38,8 @@ const AudioClipSchema = z.object({
   originalDurationMs: z.number(),
   audioOffsetMs: z.number().optional(),
   trackId: z.string().optional(),
+  fadeInMs: z.number().min(0).optional(),
+  fadeOutMs: z.number().min(0).optional(),
 });
 
 // Scene schema (matches editor store Scene type)
@@ -53,6 +55,7 @@ const SceneSchema = z.object({
   trackId: z.string().optional(), // NEW track assignment
   gain: z.number().min(0).max(1).optional(), // NEW audio control
   muted: z.boolean().optional(), // NEW audio control
+  originalDurationMs: z.number().optional(), // NEW video duration constraint
 });
 
 // Project metadata
