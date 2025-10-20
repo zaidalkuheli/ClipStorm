@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { ClientOnly } from "@/components/ui/ClientOnly";
 import { Button } from "@/components/ui/Button";
-import { Play, Pause, SkipBack, SkipForward } from "lucide-react";
+import { Play, Pause, SkipBack, SkipForward, RotateCcw } from "lucide-react";
 import { useEditorStore, type AspectRatio } from "@/stores/editorStore";
 import { usePlaybackTimer } from "@/hooks/usePlaybackTimer";
 import { useAudioPlayback } from "@/hooks/useAudioPlayback";
@@ -535,38 +535,41 @@ export function AutoFitFrame({ aspect, showGrid, showSafeArea, children }: Props
           </div>
         </div>
 
-        {/* Time Counter - bottom left, high contrast (keeps controls centered) */}
-        <div className="absolute bottom-1 left-2 bg-black/60 border border-white/15 rounded-md px-3 py-1 backdrop-blur-sm shadow-sm">
-          <div className="text-sm text-white font-mono tracking-wider">
-            {formatTime(playheadMs)} <span className="opacity-60">/</span> {formatTime(durationMs)}
+        {/* Bottom overlay bar for perfect alignment of time and aspect */}
+        <div className="absolute inset-x-0 bottom-0 z-10 pointer-events-none">
+          <div className="flex items-center justify-between">
+            {/* Time Counter */}
+            <div className="pointer-events-auto bg-black/60 border border-white/15 rounded-md h-6 leading-none backdrop-blur-sm shadow-sm flex items-center">
+              <div className="text-sm text-white font-mono tracking-wider h-6 flex items-center">
+                {formatTime(playheadMs)} <span className="opacity-60">/</span> {formatTime(durationMs)}
+              </div>
+            </div>
+            {/* Aspect Ratio + Reset (bottom-right corner) */}
+            <div className="pointer-events-auto flex items-center gap-2 mr-2">
+              <select 
+                value={aspect}
+                onChange={(e) => setAspect(e.target.value as any)}
+                className="text-[11px] h-6 leading-none px-2 py-0 bg-black/60 border border-white/15 rounded-md backdrop-blur-sm shadow-sm text-white cursor-pointer hover:bg-black/70 transition-colors"
+              >
+                <option value="9:16">9:16</option>
+                <option value="1:1">1:1</option>
+                <option value="16:9">16:9</option>
+              </select>
+              {current?.asset && (
+                <button
+                  onClick={resetTransform}
+                  className="h-6 w-6 flex items-center justify-center bg-black/60 border border-white/15 rounded-md backdrop-blur-sm shadow-sm text-white hover:bg-white/10 transition-colors"
+                  aria-label="Reset Transform"
+                  title="Reset Transform"
+                >
+                  <RotateCcw size={12} />
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Aspect Ratio - separate, positioned independently */}
-        <div className="absolute top-2 right-2 z-10">
-          <select 
-            value={aspect}
-            onChange={(e) => setAspect(e.target.value as any)}
-            className="text-xs px-2 py-1 bg-[var(--surface-primary)]/95 border border-[var(--border-primary)]/20 rounded backdrop-blur-md shadow-sm text-[var(--text-primary)] cursor-pointer hover:bg-[var(--surface-secondary)]/50 transition-colors"
-          >
-            <option value="9:16">9:16</option>
-            <option value="1:1">1:1</option>
-            <option value="16:9">16:9</option>
-          </select>
-        </div>
-
-        {/* Minimal Transform Controls */}
-        {current?.asset && (
-          <div className="absolute top-2 left-2 z-10">
-            <Button
-              onClick={resetTransform}
-              className="text-xs px-2 py-1 bg-black/50 border border-white/20 rounded backdrop-blur-md shadow-sm text-white hover:bg-white/10 transition-colors"
-              title="Reset Transform"
-            >
-              Reset
-            </Button>
-          </div>
-        )}
+        {/* (Reset moved next to aspect dropdown) */}
       </div>
     </ClientOnly>
   );

@@ -325,6 +325,16 @@ export function AppHeader() {
                 {dirty && <span className="text-[var(--accent-warm)] ml-1">•</span>}
               </div>
             )}
+
+            {/* Editor tools moved from Inspector */}
+            <div className="ml-3 flex items-center gap-1">
+              <Button variant="ghost" className="px-1.5 py-0.5 text-xs">
+                Captions
+              </Button>
+              <Button variant="ghost" className="px-1.5 py-0.5 text-xs">
+                Transitions
+              </Button>
+            </div>
           </div>
           
           <div className="flex items-center gap-1">

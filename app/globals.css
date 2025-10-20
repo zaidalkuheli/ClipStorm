@@ -180,10 +180,10 @@ svg * {
 }
 
 .panel-header {
-  @apply text-xs font-semibold uppercase tracking-wide;
+  @apply text-[11px] font-semibold uppercase tracking-wide;
   color: var(--text-secondary);
   border-bottom: 1px solid var(--border-primary);
-  padding: var(--space-lg) var(--space-xl);
+  padding: 8px 12px; /* compact header */
   background: linear-gradient(180deg, var(--surface-secondary), var(--surface-tertiary));
   border-radius: var(--radius-xl) var(--radius-xl) 0 0;
   position: relative;
@@ -200,7 +200,7 @@ svg * {
 }
 
 .panel-body { 
-  padding: 12px;
+  padding: 8px; /* tighter body padding for minimal look */
   display: flex;
   flex-direction: column;
   flex: 1;          /* fill remaining panel height */

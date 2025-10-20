@@ -90,6 +90,8 @@ export function AssetsPanel() {
     return nameMatch || typeMatch;
   });
 
+  const hasAssets = filteredAssets.length > 0;
+
   // Check if asset file exists (for red box display)
   const isAssetMissing = (asset: MediaAsset) => {
     return asset.isMissing || (!asset.file && !asset.url); // Use isMissing flag or fallback to old logic
@@ -121,30 +123,35 @@ export function AssetsPanel() {
   }, [assets, filteredAssets]);
 
   return (
-    <Panel title="Assets" className="h-full">
-      <div className="flex flex-col h-full space-y-3">
-        {/* Import Button */}
-        <button
-          onClick={handleImportClick}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-[var(--surface-secondary)] border border-[var(--border-primary)] rounded-lg text-[var(--text-primary)] hover:bg-[var(--surface-tertiary)] transition-colors"
-        >
-          <Plus size={14} />
-          <span className="text-sm">Import Media</span>
-        </button>
-
-        {/* Search Bar - only show when there are assets */}
-        {filteredAssets.length > 0 && (
-          <div className="relative">
-            <Search size={14} className="absolute left-2 top-1/2 transform -translate-y-1/2 text-[var(--text-tertiary)]" />
-            <input
-              type="text"
-              placeholder="Search files..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-8 pr-2 py-1.5 bg-[var(--surface-primary)] border border-[var(--border-primary)] rounded text-xs text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent-cool)]"
-            />
-          </div>
-        )}
+    <Panel
+      title={
+        <div className="flex items-center gap-2">
+          <span>Assets</span>
+          <button
+            onClick={handleImportClick}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[var(--border-primary)] text-[var(--text-primary)] hover:bg-[var(--surface-tertiary)] transition-colors text-[10px]"
+            aria-label="Import media"
+            title="Import media"
+          >
+            <Plus size={12} />
+            <span>Import</span>
+          </button>
+        </div>
+      }
+      className="h-full"
+    >
+      <div className={`flex flex-col h-full ${hasAssets ? 'space-y-2' : 'space-y-1'}`}>
+        {/* Search */}
+        <div className="relative">
+          <Search size={12} className="absolute left-2 top-1/2 transform -translate-y-1/2 text-[var(--text-tertiary)]" />
+          <input
+            type="text"
+            placeholder="Search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-7 pr-2 py-1 bg-[var(--surface-primary)] border border-[var(--border-primary)] rounded-sm text-xs text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent-cool)]"
+          />
+        </div>
 
         {/* Hidden File Input */}
         <input
@@ -161,9 +168,7 @@ export function AssetsPanel() {
           <>
             {/* View Mode Toggle */}
             <div className="flex items-center justify-between">
-              <span className="text-xs text-[var(--text-tertiary)]">
-                {filteredAssets.length} file{filteredAssets.length !== 1 ? 's' : ''}
-              </span>
+              <span className="text-xs text-[var(--text-tertiary)]">{filteredAssets.length} items</span>
               <div className="flex gap-1">
                 <button
                   onClick={() => setViewMode('grid')}
@@ -182,7 +187,9 @@ export function AssetsPanel() {
 
             {/* Assets Grid */}
             <div className="flex-1 overflow-y-auto">
-            <div className={`grid gap-2 ${viewMode === 'grid' ? 'grid-cols-3' : 'grid-cols-1'}`}>
+            <div className={`grid gap-2 ${viewMode === 'grid' 
+              ? 'grid-cols-[repeat(auto-fill,minmax(110px,110px))] justify-start'
+              : 'grid-cols-[repeat(auto-fill,minmax(180px,180px))] justify-start'}`}>
                 {filteredAssets.map((asset) => (
                   <div
                     key={asset.id}
@@ -196,14 +203,14 @@ export function AssetsPanel() {
                       e.dataTransfer.effectAllowed = "copy";
                     }}
                     onDoubleClick={() => addToTimeline(asset)}
-                    className={`relative rounded-lg overflow-hidden hover:bg-[var(--surface-tertiary)] transition-colors group ${
+                    className={`relative rounded-lg overflow-hidden hover:bg-[var(--surface-tertiary)] transition-colors group ${viewMode === 'grid' ? 'w-[110px]' : 'w-[180px]'} ${
                       isAssetMissing(asset) 
                         ? 'bg-red-500/20 border-2 border-red-500 cursor-not-allowed' 
                         : 'bg-[var(--surface-secondary)] cursor-grab active:cursor-grabbing'
                     }`}
                   >
                     {/* Asset Preview */}
-                    <div className={`relative ${viewMode === 'grid' ? 'aspect-[4/3]' : 'h-20'}`}>
+                    <div className={`relative aspect-square`}>
                       {asset.type === 'image' && asset.url ? (
                         <img
                           src={asset.url}
