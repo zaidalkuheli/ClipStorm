@@ -507,7 +507,7 @@ export function AutoFitFrame({ aspect, showGrid, showSafeArea, children }: Props
 
         {/* Transport Controls - bottom center */}
         <div className="flex justify-center p-0">
-          <div className="flex items-center gap-0.5 bg-[var(--surface-primary)]/95 border border-[var(--border-primary)]/20 rounded px-2 py-0 backdrop-blur-md shadow-sm h-6 select-none">
+          <div className="flex items-center gap-0.5 bg-[var(--surface-primary)]/95 border border-[var(--border-primary)]/20 rounded-md px-2 py-0 backdrop-blur-md shadow-lg h-6 select-none">
             <Button 
               aria-label="Back 1s" 
               className="btn px-1 py-0 h-6 leading-none hover:bg-[var(--surface-secondary)]/50"
@@ -549,7 +549,7 @@ export function AutoFitFrame({ aspect, showGrid, showSafeArea, children }: Props
               <select 
                 value={aspect}
                 onChange={(e) => setAspect(e.target.value as any)}
-                className="text-[11px] h-6 leading-none px-2 py-0 bg-black/60 border border-white/15 rounded-md backdrop-blur-sm shadow-sm text-white cursor-pointer hover:bg-black/70 transition-colors"
+                className="text-[11px] h-6 leading-none px-2 py-0 bg-black/60 border border-white/15 rounded-md backdrop-blur-sm shadow-lg text-white cursor-pointer hover:bg-black/70 transition-all duration-150"
               >
                 <option value="9:16">9:16</option>
                 <option value="1:1">1:1</option>
@@ -558,7 +558,7 @@ export function AutoFitFrame({ aspect, showGrid, showSafeArea, children }: Props
               {current?.asset && (
                 <button
                   onClick={resetTransform}
-                  className="h-6 w-6 flex items-center justify-center bg-black/60 border border-white/15 rounded-md backdrop-blur-sm shadow-sm text-white hover:bg-white/10 transition-colors"
+                  className="h-6 w-6 flex items-center justify-center bg-black/60 border border-white/15 rounded-md backdrop-blur-sm shadow-lg text-white hover:bg-white/10 transition-all duration-150"
                   aria-label="Reset Transform"
                   title="Reset Transform"
                 >

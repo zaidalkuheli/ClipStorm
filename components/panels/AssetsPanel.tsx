@@ -129,7 +129,7 @@ export function AssetsPanel() {
           <span>Assets</span>
           <button
             onClick={handleImportClick}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[var(--border-primary)] text-[var(--text-primary)] hover:bg-[var(--surface-tertiary)] transition-colors text-[10px]"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[var(--border-primary)] text-[var(--text-primary)] hover:bg-[var(--surface-tertiary)] transition-all duration-150 text-[10px] font-medium hover:scale-105 shadow-sm hover:shadow-md"
             aria-label="Import media"
             title="Import media"
           >
@@ -151,7 +151,7 @@ export function AssetsPanel() {
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Escape') setSearchQuery(''); }}
             aria-label="Search assets"
-            className="w-full pl-7 pr-6 py-1 bg-[var(--surface-primary)] border border-[var(--border-primary)] rounded-sm text-xs text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent-cool)]"
+            className="w-full pl-7 pr-6 py-1.5 bg-[var(--surface-primary)] border border-[var(--border-primary)] rounded-md text-xs text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent-cool)] focus:ring-1 focus:ring-[var(--accent-cool)]/20 transition-all duration-150"
           />
           {searchQuery && (
             <button

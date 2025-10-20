@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useRef, useEffect } from "react";
-import { Edit2, Check, X, Trash2 } from "lucide-react";
+import { Edit2, Check, X, Trash2, GripVertical } from "lucide-react";
 import { useEditorStore } from "@/stores/editorStore";
 
 interface TrackHeaderProps {
@@ -12,9 +12,13 @@ interface TrackHeaderProps {
   height: number;
   onAddTrack: (type: "video" | "audio") => void;
   onRemoveTrack: (trackId: string) => void;
+  // Reorder hooks
+  onDragStartTrack?: (trackId: string) => void;
+  onDragOverTrack?: (trackId: string, e: React.DragEvent) => void;
+  onDropTrack?: (trackId: string, e: React.DragEvent) => void;
 }
 
-export function TrackHeader({ track, height, onAddTrack, onRemoveTrack }: TrackHeaderProps) {
+export function TrackHeader({ track, height, onAddTrack, onRemoveTrack, onDragStartTrack, onDragOverTrack, onDropTrack }: TrackHeaderProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(track.name);
   const renameTrack = useEditorStore(s => s.renameTrack);
@@ -22,10 +26,10 @@ export function TrackHeader({ track, height, onAddTrack, onRemoveTrack }: TrackH
   const audioClips = useEditorStore(s => s.audioClips);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Check if track has content
+  // Check if track has content (by trackId for both types)
   const hasContent = track.type === "video" 
     ? scenes.some(scene => scene.trackId === track.id)
-    : audioClips.length > 0; // Audio clips are global, so check if any exist
+    : audioClips.some(a => a.trackId === track.id);
 
   const handleRename = () => {
     if (editName.trim() && editName !== track.name) {
@@ -83,8 +87,20 @@ export function TrackHeader({ track, height, onAddTrack, onRemoveTrack }: TrackH
     <div 
       className="flex items-center justify-between px-2 py-1 bg-[var(--surface-secondary)] border-b border-[var(--border-primary)] group"
       style={{ height }}
+      onDragOver={(e) => onDragOverTrack?.(track.id, e)}
+      onDrop={(e) => onDropTrack?.(track.id, e)}
     >
       <div className="flex items-center gap-2 flex-1">
+        {/* Drag handle */}
+        <button
+          draggable
+          onDragStart={() => onDragStartTrack?.(track.id)}
+          className="px-1.5 py-1 h-6 w-6 flex items-center justify-center text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-primary)]/60 rounded-md cursor-grab active:cursor-grabbing transition-all duration-150 hover:scale-105"
+          title="Drag to reorder track"
+          aria-label="Reorder track"
+        >
+          <GripVertical size={14} />
+        </button>
         {isEditing ? (
           <div className="flex items-center gap-1 flex-1 min-w-0">
             <input

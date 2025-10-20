@@ -279,11 +279,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       // Always delete scenes that belong to this track
       const updatedScenes = scenes.filter(scene => scene.trackId !== id);
       
-      // If deleting an audio track, also delete all audio clips
-      let updatedAudioClips = audioClips;
-      if (trackToDelete.type === 'audio') {
-        updatedAudioClips = [];
-      }
+      // If deleting an audio track, only delete audio clips that belong to this track
+      const updatedAudioClips = trackToDelete.type === 'audio' 
+        ? audioClips.filter(audio => audio.trackId !== id)
+        : audioClips;
       
       set({ 
         tracks: tracks.filter(t => t.id !== id),

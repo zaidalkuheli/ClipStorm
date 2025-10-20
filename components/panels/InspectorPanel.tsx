@@ -50,9 +50,9 @@ export function InspectorPanel() {
           <div className="space-y-3">
             {/* Volume */}
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-[var(--text-secondary)]">Volume</span>
-                <span className="text-[10px] text-[var(--text-tertiary)]">{Math.round(((selectedAudio.gain ?? 1) * 100))}%</span>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-[var(--text-secondary)] font-medium">Volume</span>
+                <span className="text-[10px] text-[var(--text-tertiary)] font-mono">{Math.round(((selectedAudio.gain ?? 1) * 100))}%</span>
               </div>
               <input
                 type="range"
@@ -63,16 +63,20 @@ export function InspectorPanel() {
                   const v = Number(e.target.value);
                   useEditorStore.getState().setAudioGain(selectedAudio.id, v / 100);
                 }}
-                className="w-full"
+                className="w-full h-2 bg-[var(--surface-primary)] rounded-lg appearance-none cursor-pointer slider"
+                style={{
+                  background: `linear-gradient(to right, var(--accent-cool) 0%, var(--accent-cool) ${Math.round((selectedAudio.gain ?? 1) * 100)}%, var(--surface-primary) ${Math.round((selectedAudio.gain ?? 1) * 100)}%, var(--surface-primary) 100%)`
+                }}
               />
             </div>
             {/* Mute */}
-            <label className="flex items-center justify-between p-2 border border-[var(--border-primary)] rounded-md bg-[var(--surface-secondary)]/60 cursor-pointer select-none">
-              <span className="text-xs text-[var(--text-secondary)]">Mute</span>
+            <label className="flex items-center justify-between p-2.5 border border-[var(--border-primary)] rounded-md bg-[var(--surface-secondary)]/60 cursor-pointer select-none hover:bg-[var(--surface-secondary)]/80 transition-colors">
+              <span className="text-xs text-[var(--text-secondary)] font-medium">Mute</span>
               <input
                 type="checkbox"
                 checked={(selectedAudio.gain ?? 1) === 0}
                 onChange={() => useEditorStore.getState().toggleAudioMute(selectedAudio.id)}
+                className="h-4 w-4 rounded border-[var(--border-primary)] bg-[var(--surface-primary)] text-[var(--accent-cool)] focus:ring-[var(--accent-cool)] focus:ring-2"
               />
             </label>
           </div>

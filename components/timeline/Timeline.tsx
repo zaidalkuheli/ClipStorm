@@ -43,6 +43,7 @@ export function Timeline() {
   const tracks = useEditorStore(s => s.tracks);
   const addTrack = useEditorStore(s => s.addTrack);
   const removeTrack = useEditorStore(s => s.removeTrack);
+  const setTracks = useEditorStore(s => s.setTracks);
 
   // Core editing actions
   const playheadMs = useEditorStore(s => s.playheadMs);
@@ -171,6 +172,28 @@ export function Timeline() {
 
   const handleRemoveTrack = (trackId: string) => {
     removeTrack(trackId);
+  };
+
+  // Reorder tracks by drag/drop on headers
+  const dragTrackIdRef = useRef<string | null>(null);
+  const onDragStartTrack = (trackId: string) => {
+    dragTrackIdRef.current = trackId;
+  };
+  const onDragOverTrack = (overTrackId: string, e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  };
+  const onDropTrack = (targetTrackId: string, e: React.DragEvent) => {
+    e.preventDefault();
+    const dragId = dragTrackIdRef.current;
+    if (!dragId || dragId === targetTrackId) return;
+    const list = [...tracks];
+    const from = list.findIndex(t => t.id === dragId);
+    const to = list.findIndex(t => t.id === targetTrackId);
+    if (from === -1 || to === -1) return;
+    const [moved] = list.splice(from, 1);
+    list.splice(to, 0, moved);
+    setTracks(list);
   };
 
   // Close dropdown when clicking outside
@@ -345,18 +368,18 @@ export function Timeline() {
         <div className="relative flex-1 overflow-hidden">
           <div className="flex h-full">
             {/* Left labels column - fixed position, NOT scrollable */}
-            <div className="flex-shrink-0 w-32 bg-[var(--surface-primary)] border-r border-[var(--border-primary)] select-none">
+            <div className="flex-shrink-0 w-40 bg-[var(--surface-primary)] border-r border-[var(--border-primary)] select-none">
               {/* Timeline label with add track button */}
               <div className="h-8 flex items-center justify-between px-2 text-[11px] text-[var(--text-secondary)] font-medium select-none">
                 <span className="text-[12px] font-semibold">Timeline</span>
                 <div className="relative" ref={dropdownRef}>
                   <button
                     onClick={() => setShowAddTrackDropdown(!showAddTrackDropdown)}
-                    className="p-1 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)] rounded transition-colors flex items-center gap-1"
+                    className="px-3 py-2 text-white hover:text-white hover:bg-[var(--surface-secondary)] rounded-md transition-all duration-200 flex items-center gap-2 font-semibold shadow-sm hover:shadow-md"
                     title="Add track"
                   >
-                    <Plus size={12} />
-                    <ChevronDown size={10} />
+                    <Plus size={16} />
+                    <ChevronDown size={14} />
                   </button>
                   
                   {showAddTrackDropdown && (
@@ -385,6 +408,9 @@ export function Timeline() {
                   height={track.type === "video" ? 64 : 48}
                   onAddTrack={handleAddTrack}
                   onRemoveTrack={handleRemoveTrack}
+                  onDragStartTrack={onDragStartTrack}
+                  onDragOverTrack={onDragOverTrack}
+                  onDropTrack={onDropTrack}
                 />
               ))}
             </div>
