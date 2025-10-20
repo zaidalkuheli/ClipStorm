@@ -5,6 +5,59 @@ import { useEditorStore } from "./editorStore";
 import { computeWaveform, type WaveformData } from "@/lib/computePeaks";
 import { fileStorage } from "@/lib/fileStorage";
 
+// Generate video thumbnail from video file
+async function generateVideoThumbnail(file: File): Promise<string> {
+  console.log('🎬 Starting video thumbnail generation for:', file.name);
+  return new Promise((resolve, reject) => {
+    const video = document.createElement('video');
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    if (!ctx) {
+      console.error('❌ Could not get canvas context');
+      reject(new Error('Could not get canvas context'));
+      return;
+    }
+    
+    video.addEventListener('loadedmetadata', () => {
+      console.log('🎬 Video metadata loaded:', {
+        duration: video.duration,
+        width: video.videoWidth,
+        height: video.videoHeight
+      });
+      
+      // Set canvas size to video dimensions
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      
+      // Seek to 1 second or 10% of duration, whichever is smaller
+      const seekTime = Math.min(1, video.duration * 0.1);
+      console.log('🎬 Seeking to:', seekTime);
+      video.currentTime = seekTime;
+    });
+    
+    video.addEventListener('seeked', () => {
+      console.log('🎬 Video seeked, drawing frame');
+      // Draw the video frame to canvas
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      
+      // Convert canvas to data URL
+      const thumbnail = canvas.toDataURL('image/jpeg', 0.8);
+      console.log('✅ Video thumbnail generated, size:', thumbnail.length);
+      resolve(thumbnail);
+    });
+    
+    video.addEventListener('error', (e) => {
+      console.error('❌ Video loading failed:', e);
+      reject(new Error('Video loading failed'));
+    });
+    
+    // Load the video
+    video.src = URL.createObjectURL(file);
+    video.load();
+  });
+}
+
 interface MediaAsset {
   id: string;
   name: string;
@@ -30,6 +83,7 @@ interface AssetsState {
   setWaveform: (assetId: string, data: WaveformData) => void;
   analyzeAsset: (assetId: string) => Promise<void>;
   analyzeAllAudioAssets: () => Promise<void>;
+  generateMissingThumbnails: () => Promise<void>;
 }
 
 export const useAssetsStore = create<AssetsState>((set, get) => ({
@@ -177,7 +231,8 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
         type: projectAsset.kind === 'image' ? 'image' : 
               projectAsset.kind === 'music' || projectAsset.kind === 'vo' ? 'audio' : 'video',
         url: url,
-        thumbnail: projectAsset.kind === 'image' ? url : undefined,
+        thumbnail: projectAsset.kind === 'image' ? url : 
+                  projectAsset.kind === 'video' ? url : undefined,
         addedAt: new Date(),
         file: file || undefined,
         isMissing: isFileMissing // Add missing flag
@@ -194,6 +249,11 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
     setTimeout(() => {
       get().analyzeAllAudioAssets();
     }, 100); // Small delay to ensure state is updated
+
+    // Generate thumbnails for video assets
+    setTimeout(() => {
+      get().generateMissingThumbnails();
+    }, 200); // Small delay after audio analysis
   },
 
   getAssetsForProject: async () => {
@@ -308,6 +368,34 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
     
     for (const asset of audioAssets) {
       await get().analyzeAsset(asset.id);
+    }
+  },
+
+  generateMissingThumbnails: async () => {
+    const { assets } = get();
+    const videoAssets = assets.filter(asset => 
+      asset.type === 'video' && 
+      !asset.thumbnail && 
+      asset.file
+    );
+    
+    console.log('🎬 Found video assets without thumbnails:', videoAssets.length);
+    
+    for (const asset of videoAssets) {
+      try {
+        console.log('🎬 Generating thumbnail for existing video:', asset.name);
+        const thumbnail = await generateVideoThumbnail(asset.file!);
+        
+        set(state => ({
+          assets: state.assets.map(a => 
+            a.id === asset.id ? { ...a, thumbnail } : a
+          )
+        }));
+        
+        console.log('✅ Thumbnail generated for:', asset.name);
+      } catch (error) {
+        console.warn('❌ Failed to generate thumbnail for:', asset.name, error);
+      }
     }
   }
 }));

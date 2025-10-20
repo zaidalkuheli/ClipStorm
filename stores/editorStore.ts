@@ -78,6 +78,9 @@ export type Scene = {
     y: number;
     scale: number;
   } | null;
+  // Audio control for video scenes
+  gain?: number; // Volume level (0..1)
+  muted?: boolean; // Mute state
 };
 
 export type AudioClip = {
@@ -119,6 +122,8 @@ interface EditorState {
   audioClips: AudioClip[];
   setAudioGain: (id: string, gain: number) => void;
   toggleAudioMute: (id: string) => void;
+  setSceneGain: (id: string, gain: number) => void;
+  toggleSceneMute: (id: string) => void;
   
   // history
   history: History;
@@ -255,6 +260,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   })),
   toggleAudioMute: (id) => set(state => ({
     audioClips: state.audioClips.map(a => a.id === id ? { ...a, gain: (a.gain ?? 1) > 0 ? 0 : 1 } : a)
+  })),
+  setSceneGain: (id, gain) => set(state => ({
+    scenes: state.scenes.map(s => s.id === id ? { ...s, gain: bounds(gain, 0, 1) } : s)
+  })),
+  toggleSceneMute: (id) => set(state => ({
+    scenes: state.scenes.map(s => s.id === id ? { ...s, muted: !s.muted } : s)
   })),
   
   // history

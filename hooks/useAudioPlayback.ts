@@ -7,6 +7,7 @@ export function useAudioPlayback() {
   const isPlaying = useEditorStore(s => s.isPlaying);
   const playheadMs = useEditorStore(s => s.playheadMs);
   const audioClips = useEditorStore(s => s.audioClips);
+  const scenes = useEditorStore(s => s.scenes);
   const tracks = useEditorStore(s => s.tracks);
   const getAssetById = useAssetsStore(s => s.getById);
   
@@ -16,6 +17,11 @@ export function useAudioPlayback() {
   const getCurrentAudioClips = () => {
     const clipsAtPlayhead = audioClips.filter(clip => 
       playheadMs >= clip.startMs && playheadMs < clip.endMs
+    );
+
+    // Also get scenes at playhead that might have audio
+    const scenesAtPlayhead = scenes.filter(scene => 
+      playheadMs >= scene.startMs && playheadMs < scene.endMs && scene.assetId
     );
 
     // Check if any track is soloed
@@ -28,8 +34,19 @@ export function useAudioPlayback() {
       const filteredClips = clipsAtPlayhead.filter(clip => 
         clip.trackId && soloedTrackIds.includes(clip.trackId)
       );
-      console.log('🎵 Solo mode active:', { soloedTracks: soloedTracks.map(t => t.name), playingClips: filteredClips.length });
-      return filteredClips;
+      
+      // Also include scenes from soloed video tracks
+      const filteredScenes = scenesAtPlayhead.filter(scene => 
+        scene.trackId && soloedTrackIds.includes(scene.trackId)
+      );
+      
+      console.log('🎵 Solo mode active:', { 
+        soloedTracks: soloedTracks.map(t => t.name), 
+        playingClips: filteredClips.length,
+        playingScenes: filteredScenes.length 
+      });
+      
+      return { clips: filteredClips, scenes: filteredScenes };
     }
 
     // Filter out clips from muted tracks
@@ -39,12 +56,19 @@ export function useAudioPlayback() {
       return !track?.muted; // Don't play if track is muted
     });
     
+    // Filter out scenes from muted video tracks
+    const filteredScenes = scenesAtPlayhead.filter(scene => {
+      if (!scene.trackId) return true; // Scenes without trackId should play
+      const track = tracks.find(t => t.id === scene.trackId);
+      return !track?.muted; // Don't play if track is muted
+    });
+    
     const mutedTracks = tracks.filter(track => track.muted);
     if (mutedTracks.length > 0) {
-      console.log('🔇 Muted tracks:', mutedTracks.map(t => t.name), 'Playing clips:', filteredClips.length);
+      console.log('🔇 Muted tracks:', mutedTracks.map(t => t.name), 'Playing clips:', filteredClips.length, 'Playing scenes:', filteredScenes.length);
     }
     
-    return filteredClips;
+    return { clips: filteredClips, scenes: filteredScenes };
   };
 
   // Create or get audio element for a clip
@@ -64,13 +88,33 @@ export function useAudioPlayback() {
     return audio;
   };
 
+  // Create or get audio element for a scene (video with audio)
+  const getSceneAudioElement = (scene: typeof scenes[0]) => {
+    const existing = audioElementsRef.current.get(scene.id);
+    if (existing) return existing;
+
+    const asset = getAssetById(scene.assetId);
+    if (!asset || (asset.type !== 'video' && asset.type !== 'audio')) return null;
+
+    const audio = new Audio(asset.url);
+    audio.preload = 'metadata';
+    audio.loop = false;
+    // Use scene gain for volume control
+    audio.volume = Math.max(0, Math.min(1, scene.gain ?? 1));
+    audioElementsRef.current.set(scene.id, audio);
+    return audio;
+  };
+
   // Update audio playback based on playhead position
   useEffect(() => {
-    const currentClips = getCurrentAudioClips();
+    const { clips: currentClips, scenes: currentScenes } = getCurrentAudioClips();
     
     // Stop all audio elements first
-    audioElementsRef.current.forEach((audio, clipId) => {
-      if (!currentClips.find(clip => clip.id === clipId)) {
+    audioElementsRef.current.forEach((audio, elementId) => {
+      const isCurrentClip = currentClips.find(clip => clip.id === elementId);
+      const isCurrentScene = currentScenes.find(scene => scene.id === elementId);
+      
+      if (!isCurrentClip && !isCurrentScene) {
         audio.pause();
         audio.currentTime = 0;
       }
@@ -121,20 +165,51 @@ export function useAudioPlayback() {
         audio.pause();
       }
     });
-  }, [isPlaying, playheadMs, audioClips, tracks]);
 
-  // Cleanup audio elements when clips are removed
-  useEffect(() => {
-    const currentClipIds = new Set(audioClips.map(clip => clip.id));
-    
-    audioElementsRef.current.forEach((audio, clipId) => {
-      if (!currentClipIds.has(clipId)) {
+    // Play current scenes (video with audio)
+    currentScenes.forEach(scene => {
+      const audio = getSceneAudioElement(scene);
+      if (!audio) return;
+
+      // Apply volume/mute from scene gain and muted state
+      const volume = scene.muted ? 0 : Math.max(0, Math.min(1, scene.gain ?? 1));
+      if (audio.volume !== volume) {
+        audio.volume = volume;
+      }
+
+      // Calculate audio time for scene
+      const audioTimeSeconds = (playheadMs - scene.startMs) / 1000;
+      
+      // Only play if audio time is within the scene duration
+      if (audioTimeSeconds >= 0 && audioTimeSeconds < (scene.endMs - scene.startMs) / 1000) {
+        audio.currentTime = audioTimeSeconds;
+        
+        if (isPlaying && !audio.paused) {
+          // Already playing at correct time
+        } else if (isPlaying && audio.paused) {
+          audio.play().catch(console.error);
+        } else if (!isPlaying && !audio.paused) {
+          audio.pause();
+        }
+      } else if (!isPlaying && !audio.paused) {
         audio.pause();
-        audio.src = '';
-        audioElementsRef.current.delete(clipId);
       }
     });
-  }, [audioClips]);
+  }, [isPlaying, playheadMs, audioClips, scenes, tracks]);
+
+  // Cleanup audio elements when clips or scenes are removed
+  useEffect(() => {
+    const currentClipIds = new Set(audioClips.map(clip => clip.id));
+    const currentSceneIds = new Set(scenes.map(scene => scene.id));
+    
+    audioElementsRef.current.forEach((audio, elementId) => {
+      if (!currentClipIds.has(elementId) && !currentSceneIds.has(elementId)) {
+        audio.pause();
+        audio.src = '';
+        audioElementsRef.current.delete(elementId);
+      }
+    });
+  }, [audioClips, scenes]);
 
   // Cleanup on unmount
   useEffect(() => {

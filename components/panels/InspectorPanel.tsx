@@ -44,7 +44,7 @@ export function InspectorPanel() {
         )}
       </div>
 
-      {/* Minimal content: show audio controls when audio selected; otherwise tiny hint */}
+      {/* Minimal content: show controls when audio or video scene selected; otherwise tiny hint */}
       {selectedAudio ? (
         <div className="flex-1 min-h-0 overflow-auto pt-2">
           <div className="space-y-3">
@@ -79,6 +79,60 @@ export function InspectorPanel() {
                 className="h-4 w-4 rounded border-[var(--border-primary)] bg-[var(--surface-primary)] text-[var(--accent-cool)] focus:ring-[var(--accent-cool)] focus:ring-2"
               />
             </label>
+          </div>
+        </div>
+      ) : selectedScene ? (
+        <div className="flex-1 min-h-0 overflow-auto pt-2">
+          <div className="space-y-3">
+            {/* Show video audio controls only if the scene has a video asset */}
+            {(() => {
+              const asset = selectedScene.assetId ? getAssetById(selectedScene.assetId) : null;
+              const isVideo = asset?.type === 'video';
+              
+              if (!isVideo) {
+                return (
+                  <div className="text-[10px] text-[var(--text-tertiary)] text-center py-4">
+                    No audio controls for images
+                  </div>
+                );
+              }
+              
+              return (
+                <>
+                  {/* Volume */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-[var(--text-secondary)] font-medium">Volume</span>
+                      <span className="text-[10px] text-[var(--text-tertiary)] font-mono">{Math.round(((selectedScene.gain ?? 1) * 100))}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={Math.round((selectedScene.gain ?? 1) * 100)}
+                      onChange={(e) => {
+                        const v = Number(e.target.value);
+                        useEditorStore.getState().setSceneGain(selectedScene.id, v / 100);
+                      }}
+                      className="w-full h-2 bg-[var(--surface-primary)] rounded-lg appearance-none cursor-pointer slider"
+                      style={{
+                        background: `linear-gradient(to right, var(--accent-cool) 0%, var(--accent-cool) ${Math.round((selectedScene.gain ?? 1) * 100)}%, var(--surface-primary) ${Math.round((selectedScene.gain ?? 1) * 100)}%, var(--surface-primary) 100%)`
+                      }}
+                    />
+                  </div>
+                  {/* Mute */}
+                  <label className="flex items-center justify-between p-2.5 border border-[var(--border-primary)] rounded-md bg-[var(--surface-secondary)]/60 cursor-pointer select-none hover:bg-[var(--surface-secondary)]/80 transition-colors">
+                    <span className="text-xs text-[var(--text-secondary)] font-medium">Mute</span>
+                    <input
+                      type="checkbox"
+                      checked={selectedScene.muted ?? false}
+                      onChange={() => useEditorStore.getState().toggleSceneMute(selectedScene.id)}
+                      className="h-4 w-4 rounded border-[var(--border-primary)] bg-[var(--surface-primary)] text-[var(--accent-cool)] focus:ring-[var(--accent-cool)] focus:ring-2"
+                    />
+                  </label>
+                </>
+              );
+            })()}
           </div>
         </div>
       ) : (

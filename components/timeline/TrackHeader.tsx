@@ -166,8 +166,8 @@ export function TrackHeader({ track, height, onAddTrack, onRemoveTrack, onDragSt
                  <Trash2 size={10} />
                </button>
                
-               {/* Mute/Solo buttons - only show for audio tracks */}
-               {track.type === "audio" && (
+               {/* Mute/Solo buttons - show for both audio and video tracks */}
+               {(track.type === "audio" || track.type === "video") && (
                  <>
                    <button
                      onClick={() => toggleTrackMute(track.id)}

@@ -92,6 +92,20 @@ export function AutoFitFrame({ aspect, showGrid, showSafeArea, children }: Props
   useEffect(() => {
     const el = videoRef.current;
     if (!el || !current?.scene || !current?.asset || current.asset.type !== "video") return;
+    
+    console.log('🎬 Video sync:', {
+      playheadMs,
+      sceneStartMs: current.scene.startMs,
+      localMs: playheadMs - current.scene.startMs,
+      isPlaying,
+      videoPaused: el.paused,
+      videoCurrentTime: el.currentTime,
+      videoMuted: el.muted
+    });
+    
+    // Apply scene mute state
+    el.muted = current.scene.muted ?? false;
+    
     const localMs = playheadMs - current.scene.startMs;
     const t = Math.max(0, localMs / 1000);
     // avoid thrashing: only seek if drift > 40ms
@@ -433,9 +447,24 @@ export function AutoFitFrame({ aspect, showGrid, showSafeArea, children }: Props
                         ref={videoRef}
                         src={current.asset.url}
                         className="w-full h-full object-contain"
-                        muted
+                        muted={false}
                         playsInline
                         preload="metadata"
+                        controls={false}
+                        onLoadedMetadata={() => {
+                          console.log('🎬 Video metadata loaded in player:', {
+                            duration: videoRef.current?.duration,
+                            width: videoRef.current?.videoWidth,
+                            height: videoRef.current?.videoHeight,
+                            src: videoRef.current?.src
+                          });
+                        }}
+                        onCanPlay={() => {
+                          console.log('🎬 Video can play in player');
+                        }}
+                        onError={(e) => {
+                          console.error('❌ Video error in player:', e);
+                        }}
                       />
                     ) : (
                       <div className="flex h-full items-center justify-center text-white/40 text-sm">

@@ -7,6 +7,59 @@ import { useProjectStore } from "@/stores/projectStore";
 import { useAssetsStore } from "@/stores/assetsStore";
 import { useEditorStore } from "@/stores/editorStore";
 
+// Generate video thumbnail from video file
+async function generateVideoThumbnail(file: File): Promise<string> {
+  console.log('🎬 Starting video thumbnail generation for:', file.name);
+  return new Promise((resolve, reject) => {
+    const video = document.createElement('video');
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    if (!ctx) {
+      console.error('❌ Could not get canvas context');
+      reject(new Error('Could not get canvas context'));
+      return;
+    }
+    
+    video.addEventListener('loadedmetadata', () => {
+      console.log('🎬 Video metadata loaded:', {
+        duration: video.duration,
+        width: video.videoWidth,
+        height: video.videoHeight
+      });
+      
+      // Set canvas size to video dimensions
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      
+      // Seek to 1 second or 10% of duration, whichever is smaller
+      const seekTime = Math.min(1, video.duration * 0.1);
+      console.log('🎬 Seeking to:', seekTime);
+      video.currentTime = seekTime;
+    });
+    
+    video.addEventListener('seeked', () => {
+      console.log('🎬 Video seeked, drawing frame');
+      // Draw the video frame to canvas
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      
+      // Convert canvas to data URL
+      const thumbnail = canvas.toDataURL('image/jpeg', 0.8);
+      console.log('✅ Video thumbnail generated, size:', thumbnail.length);
+      resolve(thumbnail);
+    });
+    
+    video.addEventListener('error', (e) => {
+      console.error('❌ Video loading failed:', e);
+      reject(new Error('Video loading failed'));
+    });
+    
+    // Load the video
+    video.src = URL.createObjectURL(file);
+    video.load();
+  });
+}
+
 // Constants
 const ACCEPTED_FILE_TYPES = "image/*,video/*,audio/*";
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
@@ -61,9 +114,21 @@ export function AssetsPanel() {
         file: file, // Store the file for saving
       };
 
-      // Create thumbnail for images (use the same URL)
+      // Create thumbnail for images and videos
       if (asset.type === 'image') {
         asset.thumbnail = asset.url;
+      } else if (asset.type === 'video') {
+        // Generate video thumbnail
+        console.log('🎬 Generating thumbnail for video:', file.name);
+        try {
+          const thumbnail = await generateVideoThumbnail(file);
+          asset.thumbnail = thumbnail;
+          console.log('✅ Video thumbnail generated successfully:', file.name);
+        } catch (error) {
+          console.warn('❌ Failed to generate video thumbnail:', error);
+          // Fallback to a generic video icon or the video URL
+          asset.thumbnail = asset.url;
+        }
       }
 
       console.log("🔍 AssetsPanel - Adding asset:", asset);
@@ -129,12 +194,12 @@ export function AssetsPanel() {
           <span>Assets</span>
           <button
             onClick={handleImportClick}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[var(--border-primary)] text-[var(--text-primary)] hover:bg-[var(--surface-tertiary)] transition-all duration-150 text-[10px] font-medium hover:scale-105 shadow-sm hover:shadow-md"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-[var(--border-primary)] text-[var(--text-primary)] hover:bg-[var(--surface-tertiary)] transition-all duration-150 text-xs font-medium hover:scale-105 shadow-sm hover:shadow-md"
             aria-label="Import media"
             title="Import media"
           >
-            <Plus size={12} />
-            <span>Import</span>
+            <Plus size={14} />
+            <span>Import Media</span>
           </button>
         </div>
       }
@@ -224,13 +289,13 @@ export function AssetsPanel() {
                   >
                     {/* Asset Preview */}
                     <div className={`relative aspect-square`}>
-                      {asset.type === 'image' && asset.url ? (
+                      {(asset.type === 'image' || asset.type === 'video') && (asset.thumbnail || asset.url) ? (
                         <img
-                          src={asset.url}
+                          src={asset.thumbnail || asset.url}
                           alt={asset.name}
                           className="w-full h-full object-cover"
                           onError={(e) => {
-                            console.log("🔍 Image failed to load:", asset.name);
+                            console.log("🔍 Media failed to load:", asset.name);
                             e.currentTarget.style.display = 'none';
                           }}
                         />

@@ -51,6 +51,8 @@ const SceneSchema = z.object({
   assetId: z.string().nullable().optional(), // NEW optional
   transform: TransformSchema.nullable().optional(), // NEW transform data
   trackId: z.string().optional(), // NEW track assignment
+  gain: z.number().min(0).max(1).optional(), // NEW audio control
+  muted: z.boolean().optional(), // NEW audio control
 });
 
 // Project metadata

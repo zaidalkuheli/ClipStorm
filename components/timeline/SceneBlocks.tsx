@@ -460,7 +460,7 @@ export function SceneBlocks({ trackId }: { trackId?: string }) {
                 borderColor: isSelected ? "#ffffff" : colors.border,
                 borderWidth: isSelected ? "2px" : "1px",
                 borderStyle: "solid",
-                backgroundImage: hasMedia ? `url(${asset.url})` : undefined,
+                backgroundImage: hasMedia ? `url(${asset.thumbnail || asset.url})` : undefined,
                 backgroundSize: 'auto 100%',
                 backgroundPosition: 'left center',
                 backgroundRepeat: 'repeat-x'
