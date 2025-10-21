@@ -304,6 +304,8 @@ export function useProjectDirtyTracker() {
       // Check if any relevant state has changed
       const hasChanged = 
         JSON.stringify(state.scenes) !== JSON.stringify(prevState.scenes) ||
+        JSON.stringify(state.audioClips) !== JSON.stringify(prevState.audioClips) ||
+        JSON.stringify(state.tracks) !== JSON.stringify(prevState.tracks) ||
         state.durationMs !== prevState.durationMs ||
         state.fps !== prevState.fps ||
         state.aspect !== prevState.aspect ||
