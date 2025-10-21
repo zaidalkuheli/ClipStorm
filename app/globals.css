@@ -520,6 +520,18 @@ select:focus option {
   transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
+/* Prevent hover overlays from inverting at extreme zoom widths */
+.timeline-audio {
+  /* Ensure background color always wins over children/hover layers */
+  background-clip: padding-box;
+}
+
+/* Avoid white overlay flicker on tiny widths */
+.timeline-audio .handle {
+  /* no default background; hover applies conditional class in React */
+  background: transparent;
+}
+
 
 .timeline-clip-compact:active {
   transform: translateY(0);
@@ -907,6 +919,15 @@ select:focus option {
 .timeline-scene { 
   will-change: left, width; 
   transition: none; 
+}
+
+/* ====== Audio Block Smooth Resizing (prevent white flash at extreme zoom) ====== */
+.timeline-audio {
+  will-change: left, width;
+  transition: none; /* avoid animating width/left during zoom */
+  contain: paint;   /* isolate paint to block, prevents bleed/flicker */
+  backface-visibility: hidden;
+  transform: translateZ(0); /* promote to its own layer */
 }
 
 .handle { 

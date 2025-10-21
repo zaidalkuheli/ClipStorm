@@ -30,6 +30,10 @@ const TrackSchema = z.object({
 // Audio clip schema
 const AudioClipSchema = z.object({
   id: z.string(),
+  // Frame-accurate fields (primary source of truth)
+  startF: z.number().int().optional(),
+  durF: z.number().int().optional(),
+  // Millisecond fields (computed from frames, legacy)
   startMs: z.number(),
   endMs: z.number(),
   assetId: z.string(),
@@ -46,6 +50,10 @@ const AudioClipSchema = z.object({
 const SceneSchema = z.object({
   id: z.string(),
   label: z.string().optional(),
+  // Frame-accurate fields (primary source of truth)
+  startF: z.number().int().optional(),
+  durF: z.number().int().optional(),
+  // Millisecond fields (computed from frames, legacy)
   startMs: z.number(),
   endMs: z.number(),
   linkLeftId: z.string().nullable().optional(),
@@ -131,12 +139,54 @@ export function makeEmptyProject(name?: string): Project {
 }
 
 export function migrateToLatest(data: unknown): Project {
+  const dataObj = data as any;
+  
+  // Migrate legacy projects to include frame data
+  if (dataObj && typeof dataObj === 'object' && dataObj.timeline && dataObj.settings) {
+    const fps = dataObj.settings.fps || 30;
+    
+    // Migrate scenes to include frame data
+    if (Array.isArray(dataObj.timeline.scenes)) {
+      dataObj.timeline.scenes = dataObj.timeline.scenes.map((scene: any) => {
+        if (scene.startF === undefined || scene.durF === undefined) {
+          const startF = Math.round((scene.startMs * fps) / 1000);
+          const durF = Math.round(((scene.endMs - scene.startMs) * fps) / 1000);
+          return {
+            ...scene,
+            startF,
+            durF,
+            startMs: Math.round((startF * 1000) / fps),
+            endMs: Math.round((startF * 1000) / fps) + Math.round((durF * 1000) / fps)
+          };
+        }
+        return scene;
+      });
+    }
+    
+    // Migrate audio clips to include frame data
+    if (Array.isArray(dataObj.timeline.audioClips)) {
+      dataObj.timeline.audioClips = dataObj.timeline.audioClips.map((clip: any) => {
+        if (clip.startF === undefined || clip.durF === undefined) {
+          const startF = Math.round((clip.startMs * fps) / 1000);
+          const durF = Math.round(((clip.endMs - clip.startMs) * fps) / 1000);
+          return {
+            ...clip,
+            startF,
+            durF,
+            startMs: Math.round((startF * 1000) / fps),
+            endMs: Math.round((startF * 1000) / fps) + Math.round((durF * 1000) / fps)
+          };
+        }
+        return clip;
+      });
+    }
+  }
+  
   // For now, only support v1
   try {
-    return ProjectV1.parse(data);
+    return ProjectV1.parse(dataObj);
   } catch (error) {
     if (error instanceof Error) {
-      const dataObj = data as any;
       if (dataObj && typeof dataObj === 'object') {
         
         // Handle missing audioClips field

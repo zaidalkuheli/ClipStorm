@@ -217,12 +217,18 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
       }
       
       // Create object URL for the file
-      let url = projectAsset.uri;
+      let url = '';
       if (file) {
         url = URL.createObjectURL(file);
+        console.log(`✅ Created new ObjectURL for ${projectAsset.name}: ${url}`);
       } else if (isFileMissing) {
         // Use a placeholder URL for missing files
         url = `missing:${projectAsset.id}`;
+        console.warn(`⚠️ File missing for ${projectAsset.name}, using placeholder`);
+      } else if (projectAsset.uri) {
+        // Fallback to old URI if file is not available
+        url = projectAsset.uri;
+        console.log(`🔄 Using fallback URI for ${projectAsset.name}: ${url}`);
       }
       
       const asset: MediaAsset = {
@@ -239,7 +245,14 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
       };
       
       loadedAssets.push(asset);
-      console.log(`🔍 Asset loaded: ${asset.name}`, asset);
+      console.log(`🔍 Asset loaded: ${asset.name}`, {
+        id: asset.id,
+        name: asset.name,
+        type: asset.type,
+        url: asset.url,
+        hasFile: !!asset.file,
+        isMissing: asset.isMissing
+      });
     }
     
     console.log("🔍 AssetsStore - Loaded assets:", loadedAssets);
@@ -340,6 +353,10 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
         waveformData = await computeWaveform(asset.file);
       } else {
         // Use URL if no file (loaded from project)
+        if (asset.url.startsWith('missing:')) {
+          console.warn('⚠️ Skipping waveform analysis for missing file:', asset.name);
+          return;
+        }
         console.log('🎵 Fetching audio from URL for analysis');
         const response = await fetch(asset.url);
         const arrayBuffer = await response.arrayBuffer();

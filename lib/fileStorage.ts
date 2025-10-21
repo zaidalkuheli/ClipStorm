@@ -2,7 +2,7 @@
 
 // IndexedDB storage for media files
 const DB_NAME = 'ClipStormMedia';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'mediaFiles';
 
 interface StoredFile {
@@ -28,10 +28,16 @@ class FileStorage {
       
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result;
+        const oldVersion = event.oldVersion;
+        const newVersion = event.newVersion;
+        
+        console.log(`🔄 IndexedDB upgrade: ${oldVersion} → ${newVersion}`);
+        
         if (!db.objectStoreNames.contains(STORE_NAME)) {
           const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
           store.createIndex('name', 'name', { unique: false });
           store.createIndex('type', 'type', { unique: false });
+          console.log(`✅ Created object store: ${STORE_NAME}`);
         }
       };
     });

@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { nanoid } from "nanoid";
 import { History, HistorySnapshot, makeSnapshot, cloneSnapshot, applySnapshot } from "./history";
 import { useAssetsStore } from "./assetsStore";
+import { msToFrames, framesToMs, quantizeMsToFrame } from "@/lib/timebase";
 
 // Tuned to feel noticeable but not sticky
 export const SNAP_PX = 8;      // ~8px snaps & links
@@ -15,13 +16,19 @@ const bounds = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, 
 const snapToGrid = (v: number, gridMs: number) =>
   gridMs > 1 ? Math.round(v / gridMs) * gridMs : v;
 
-// Link / unlink utilities
-function linkRight(cur: Scene, next?: Scene, triggerAnimation?: (id: string) => void) {
+// Link / unlink utilities - frame-accurate
+function linkRight(cur: Scene, next?: Scene, triggerAnimation?: (id: string) => void, fps?: number) {
   if (!next) return;
   cur.linkRightId = next.id;
   next.linkLeftId = cur.id;
-  // ensure perfect contact
-  cur.endMs = next.startMs;
+  // ensure perfect contact using frames if available
+  if (fps && cur.startF !== undefined && cur.durF !== undefined && next.startF !== undefined) {
+    const endF = cur.startF + cur.durF;
+    cur.endMs = framesToMs(endF, fps);
+    next.startMs = cur.endMs;
+  } else {
+    cur.endMs = next.startMs;
+  }
   // Trigger snap animation
   if (triggerAnimation) {
     triggerAnimation(cur.id);
@@ -35,12 +42,18 @@ function unlinkRight(cur: Scene, next?: Scene) {
   if (next.linkLeftId === cur.id) next.linkLeftId = null;
 }
 
-function linkLeft(cur: Scene, prev?: Scene, triggerAnimation?: (id: string) => void) {
+function linkLeft(cur: Scene, prev?: Scene, triggerAnimation?: (id: string) => void, fps?: number) {
   if (!prev) return;
   cur.linkLeftId = prev.id;
   prev.linkRightId = cur.id;
-  // ensure perfect contact
-  cur.startMs = prev.endMs;
+  // ensure perfect contact using frames if available
+  if (fps && prev.startF !== undefined && prev.durF !== undefined && cur.startF !== undefined) {
+    const prevEndF = prev.startF + prev.durF;
+    cur.startMs = framesToMs(prevEndF, fps);
+    cur.startF = prevEndF;
+  } else {
+    cur.startMs = prev.endMs;
+  }
   // Trigger snap animation
   if (triggerAnimation) {
     triggerAnimation(cur.id);
@@ -54,6 +67,26 @@ function unlinkLeft(cur: Scene, prev?: Scene) {
   if (prev.linkRightId === cur.id) prev.linkRightId = null;
 }
 
+// Frame-accurate helpers: ensure scenes/clips always have frame values and sync ms
+function ensureFrameData(item: Scene | AudioClip, fps: number): void {
+  // If frame data is missing, derive from ms
+  if (item.startF === undefined) {
+    item.startF = msToFrames(item.startMs, fps);
+  }
+  if (item.durF === undefined) {
+    item.durF = msToFrames(item.endMs - item.startMs, fps);
+  }
+  // Always sync ms from frames (frames are source of truth)
+  item.startMs = framesToMs(item.startF, fps);
+  item.endMs = item.startMs + framesToMs(item.durF, fps);
+}
+
+// Sync all items in arrays to have frame data
+function ensureAllFrameData(scenes: Scene[], audioClips: AudioClip[], fps: number): void {
+  scenes.forEach(s => ensureFrameData(s, fps));
+  audioClips.forEach(a => ensureFrameData(a, fps));
+}
+
 export type Track = {
   id: string;
   name: string;
@@ -65,6 +98,10 @@ export type Track = {
 export type Scene = { 
   id: string; 
   label?: string; 
+  // Frame-accurate storage (primary source of truth)
+  startF?: number; // Start time in frames (integer)
+  durF?: number;   // Duration in frames (integer)
+  // Millisecond values (legacy - computed from frames when present)
   startMs: number; 
   endMs: number;
   // NEW: explicit neighbor links (only to immediate neighbors)
@@ -87,6 +124,10 @@ export type Scene = {
 
 export type AudioClip = {
   id: string;
+  // Frame-accurate storage (primary source of truth)
+  startF?: number; // Start time in frames (integer)
+  durF?: number;   // Duration in frames (integer)
+  // Millisecond values (legacy - computed from frames when present)
   startMs: number;
   endMs: number;
   assetId: string;
@@ -95,7 +136,7 @@ export type AudioClip = {
   originalDurationMs: number; // Store the original audio file duration
   audioOffsetMs?: number; // Offset within the original audio file (for cut clips)
   trackId?: string; // Track assignment for vertical drag
-  // Fade controls
+  // Fade controls (remain in ms for sub-frame precision)
   fadeInMs?: number; // fade in duration in milliseconds
   fadeOutMs?: number; // fade out duration in milliseconds
 };
@@ -364,22 +405,26 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   setScenes: (scenes) => {
-    const { audioClips } = get();
+    const { audioClips, fps } = get();
+    // Ensure all scenes have frame data and sync ms values
+    ensureAllFrameData(scenes, audioClips, fps);
     const newDuration = calculateTotalDuration(scenes, audioClips);
     console.log('📏 Updating duration based on scenes:', { 
       sceneCount: scenes.length, 
-      maxEndMs: Math.max(...scenes.map(s => s.endMs)),
+      maxEndMs: scenes.length > 0 ? Math.max(...scenes.map(s => s.endMs)) : 0,
       newDurationMs: newDuration 
     });
     set({ scenes, durationMs: newDuration });
   },
 
   setAudioClips: (audioClips) => {
-    const { scenes } = get();
+    const { scenes, fps } = get();
+    // Ensure all audio clips have frame data and sync ms values
+    ensureAllFrameData(scenes, audioClips, fps);
     const newDuration = calculateTotalDuration(scenes, audioClips);
     console.log('📏 Updating duration based on audio clips:', { 
       audioCount: audioClips.length, 
-      maxEndMs: Math.max(...audioClips.map(a => a.endMs)),
+      maxEndMs: audioClips.length > 0 ? Math.max(...audioClips.map(a => a.endMs)) : 0,
       newDurationMs: newDuration 
     });
     set({ audioClips, durationMs: newDuration });
@@ -388,14 +433,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setDuration: (durationMs) => set({ durationMs }),
 
   addScene: (sceneData) => {
-    const { scenes, durationMs, audioClips } = get();
+    const { scenes, durationMs, audioClips, fps } = get();
     const newScene: Scene = {
       id: nanoid(),
       ...sceneData
     };
+    // Ensure frame data for the new scene
+    ensureFrameData(newScene, fps);
     const updatedScenes = [...scenes, newScene].sort((a, b) => a.startMs - b.startMs);
     const newDuration = calculateTotalDuration(updatedScenes, audioClips);
-    console.log('➕ Added new scene:', { newScene, newDurationMs: newDuration });
+    console.log('➕ Added new scene:', { newScene, newDurationMs: newDuration, startF: newScene.startF, durF: newScene.durF });
     set({ scenes: updatedScenes, durationMs: newDuration });
   },
 
@@ -408,20 +455,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   moveScene: (id, newStartMs, pxPerSec) => {
-    const { scenes, durationMs, triggerSnapAnimation } = get();
+    const { scenes, durationMs, triggerSnapAnimation, fps } = get();
     const sceneIndex = scenes.findIndex(s => s.id === id);
     if (sceneIndex < 0) return;
 
     const scene = scenes[sceneIndex];
-    const sceneDuration = scene.endMs - scene.startMs;
-    const newEndMs = newStartMs + sceneDuration;
-    const adjustedStartMs = Math.max(0, newEndMs - sceneDuration);
+    // Work in frames for precision
+    const newStartF = msToFrames(newStartMs, fps);
+    const durF = scene.durF ?? msToFrames(scene.endMs - scene.startMs, fps);
+    const adjustedStartF = Math.max(0, newStartF);
 
-    // Create updated scene
+    // Create updated scene with frame-accurate values
     const updatedScene = {
       ...scene,
-      startMs: adjustedStartMs,
-      endMs: newEndMs
+      startF: adjustedStartF,
+      durF: durF,
+      startMs: framesToMs(adjustedStartF, fps),
+      endMs: framesToMs(adjustedStartF + durF, fps)
     };
 
     // Update scenes array
@@ -449,10 +499,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (prevScene && prevScene.trackId === movedScene.trackId) {
       const gap = movedScene.startMs - prevScene.endMs;
       if (gap >= 0 && gap <= snapMs) {
-        // Snap & link to previous scene
-        movedScene.startMs = prevScene.endMs;
-        movedScene.endMs = movedScene.startMs + sceneDuration;
-        linkLeft(movedScene, prevScene, triggerSnapAnimation);
+        // Snap & link to previous scene - frame-accurate
+        linkLeft(movedScene, prevScene, triggerSnapAnimation, fps);
+        movedScene.endMs = movedScene.startMs + framesToMs(durF, fps);
+        movedScene.durF = durF;
       } else if (movedScene.linkLeftId === prevScene.id && (gap > unlinkMs || gap < 0)) {
         // Break link if pulled apart
         unlinkLeft(movedScene, prevScene);
@@ -463,10 +513,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (nextScene && nextScene.trackId === movedScene.trackId) {
       const gap = nextScene.startMs - movedScene.endMs;
       if (gap >= 0 && gap <= snapMs) {
-        // Snap & link to next scene
+        // Snap & link to next scene - frame-accurate
+        const nextStartF = nextScene.startF ?? msToFrames(nextScene.startMs, fps);
+        movedScene.startF = nextStartF - durF;
+        movedScene.startMs = framesToMs(movedScene.startF, fps);
         movedScene.endMs = nextScene.startMs;
-        movedScene.startMs = movedScene.endMs - sceneDuration;
-        linkRight(movedScene, nextScene, triggerSnapAnimation);
+        movedScene.durF = durF;
+        linkRight(movedScene, nextScene, triggerSnapAnimation, fps);
       } else if (movedScene.linkRightId === nextScene.id && (gap > unlinkMs || gap < 0)) {
         // Break link if pulled apart
         unlinkRight(movedScene, nextScene);
@@ -481,7 +534,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       id, 
       from: scene.startMs, 
       to: movedScene.startMs,
-      duration: sceneDuration,
+      duration: framesToMs(durF, fps),
       newDurationMs: newDuration,
       linkedLeft: !!movedScene.linkLeftId,
       linkedRight: !!movedScene.linkRightId
@@ -518,15 +571,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         set({ scenes, durationMs: newDuration });
       },
 
-      // Magnetic linking resize action
+      // Magnetic linking resize action - FRAME-ACCURATE
       resizeSceneTo: (id: string, edge: "left" | "right", targetMs: number, minMs: number, gridMs: number, pxPerSec: number) => {
-        const { scenes: s, durationMs, triggerSnapAnimation } = get();
+        const { scenes: s, durationMs, triggerSnapAnimation, fps } = get();
         const sortedScenes = [...s].sort((a,b)=>a.startMs-b.startMs);
 
         const i = sortedScenes.findIndex(sc => sc.id === id);
         if (i < 0) return;
 
         const cur = sortedScenes[i];
+        
+        // Ensure frame data exists
+        if (cur.startF === undefined || cur.durF === undefined) {
+          ensureFrameData(cur, fps);
+        }
         
         // Get asset information to determine if this is a video or image
         const asset = cur.assetId ? useAssetsStore.getState().getById(cur.assetId) : null;
@@ -537,43 +595,87 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         const prev = iInTrack > 0 ? scenesInSameTrack[iInTrack - 1] : null;
         const next = iInTrack < scenesInSameTrack.length - 1 ? scenesInSameTrack[iInTrack + 1] : null;
 
+        // Ensure neighbor frame data exists before using frame math
+        if (prev && (prev.startF === undefined || prev.durF === undefined)) {
+          ensureFrameData(prev, fps);
+        }
+        if (next && (next.startF === undefined || next.durF === undefined)) {
+          ensureFrameData(next, fps);
+        }
+
         const snapMs = pxToMs(SNAP_PX, pxPerSec);
         const unlinkMs = pxToMs(UNLINK_PX, pxPerSec);
 
         // Use the stored original duration to constrain resizing (like audio blocks)
         // Only apply duration constraints for videos, not images (images can be resized unlimited)
         const maxDurationMs = (asset?.type === 'video' && cur.originalDurationMs) ? cur.originalDurationMs : Infinity;
+        const maxDurF = msToFrames(maxDurationMs, fps);
+        const minDurF = msToFrames(minMs, fps);
 
         if (edge === "left") {
-          const low  = prev ? (prev.startMs + minMs) : 0;
-          const high = cur.endMs - minMs;
-          // Don't exceed original video duration - use original duration, not current
-          const maxStartMs = cur.endMs - maxDurationMs;
+          // Work in frames for precision
+          const targetF = msToFrames(targetMs, fps);
+          const endF = cur.startF! + cur.durF!;
+          
+          // Calculate bounds in frames (for non-linked behavior)
+          const lowF = prev ? (prev.startF! + prev.durF! + minDurF) : 0;
+          const highF = endF - minDurF;
+          const maxStartF = endF - maxDurF;
 
-          // snap, then clamp
-          let newStart = snapToGrid(targetMs, gridMs);
-          newStart = bounds(newStart, Math.max(low, maxStartMs), high);
+          // Quantize to frame and clamp
+          let newStartF = targetF;
+          newStartF = Math.max(Math.max(lowF, maxStartF), Math.min(newStartF, highF));
 
           const wasLinked = !!cur.linkLeftId && prev && cur.linkLeftId === prev.id;
 
           if (wasLinked && prev) {
-            // ripple only if linked: keep contact and trim prev
-            const delta = newStart - cur.startMs;
-            cur.startMs = newStart;
-            prev.endMs  = bounds(prev.endMs + delta, prev.startMs + minMs, cur.startMs);
-            // keep exact contact
-            cur.startMs = prev.endMs;
+            // LINKED LEFT EDGE: move the junction directly, and resize both without feedback loops
+            const prevStartF = prev.startF!;
+            const minJunctionF = prevStartF + minDurF; // prev must keep at least min duration
+            const maxJunctionByCurF = endF - minDurF;  // cur must keep at least min duration
+            // If cur has a finite max duration (video), it enforces a LOWER bound on junction (start cannot go left of endF - maxDurF)
+            const junctionLowByCurMax = Number.isFinite(maxDurF) ? (endF - maxDurF) : Number.NEGATIVE_INFINITY;
+            const junctionLowF = Math.max(minJunctionF, junctionLowByCurMax);
+            const junctionHighF = maxJunctionByCurF;
+
+
+            let junctionF = targetF;
+            junctionF = Math.max(junctionLowF, Math.min(junctionF, junctionHighF));
+
+            // If no effective change after quantization/clamp, exit early
+            if (junctionF === cur.startF) {
+              // still ensure frame->ms sync
+              cur.startMs = framesToMs(cur.startF!, fps);
+              cur.endMs = framesToMs(endF, fps);
+              prev.endMs = framesToMs(prev.startF! + prev.durF!, fps);
+              return;
+            }
+
+            // Resize prev to end at the junction, respecting its min duration
+            prev.durF = Math.max(minDurF, junctionF - prevStartF);
+            prev.endMs = framesToMs(prevStartF + prev.durF, fps);
+
+            // Set current to start at the junction, keeping its original endF
+            cur.startF = junctionF;
+            cur.durF = endF - junctionF;
+            cur.startMs = framesToMs(cur.startF, fps);
+            cur.endMs = framesToMs(endF, fps);
+
           } else {
             // not linked: don't affect prev
-            cur.startMs = newStart;
+            cur.startF = newStartF;
+            cur.durF = endF - newStartF;
+            cur.startMs = framesToMs(cur.startF, fps);
+            cur.endMs = framesToMs(endF, fps);
 
             // magnet: if close enough to prev.end => snap + link (only within same track)
             if (prev && prev.trackId === cur.trackId) {
               const gap = cur.startMs - prev.endMs; // >= 0 if separated
               if (gap >= 0 && gap <= snapMs) {
                 // snap & link
-                cur.startMs = prev.endMs;
-                linkLeft(cur, prev, triggerSnapAnimation);
+                linkLeft(cur, prev, triggerSnapAnimation, fps);
+                cur.durF = endF - cur.startF!;
+                cur.endMs = framesToMs(endF, fps);
               } else {
                 // if previously linked, only break when gap is clearly big
                 if (cur.linkLeftId === prev?.id && (gap > unlinkMs || gap < 0)) {
@@ -583,35 +685,66 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             }
           }
         } else {
-          // RIGHT EDGE
-          const low  = cur.startMs + minMs;
-          // IMPORTANT: use next.end for upper bound so it doesn't collapse while trimming
-          const high = next ? (next.endMs - minMs) : Number.MAX_SAFE_INTEGER;
-          // Don't exceed original video duration - use original duration, not current
-          const maxEndMs = cur.startMs + maxDurationMs;
+          // RIGHT EDGE - frame-accurate
+          const targetF = msToFrames(targetMs, fps);
+          const startF = cur.startF!;
+          
+          // Calculate bounds in frames
+          const lowF = startF + minDurF;
+          const highF = next ? (next.startF! - minDurF) : Number.MAX_SAFE_INTEGER;
+          const maxEndF = startF + maxDurF;
 
-          let newEnd = snapToGrid(targetMs, gridMs);
-          newEnd = bounds(newEnd, low, Math.min(high, maxEndMs));
+          let newEndF = targetF;
+          newEndF = Math.max(lowF, Math.min(newEndF, Math.min(highF, maxEndF)));
 
           const wasLinked = !!cur.linkRightId && next && cur.linkRightId === next.id;
 
           if (wasLinked && next) {
-            // ripple only if linked: keep contact and trim next
-            const delta = newEnd - cur.endMs;
-            cur.endMs = newEnd;
-            next.startMs = bounds(next.startMs + delta, cur.endMs, next.endMs - minMs);
-            // keep exact contact
-            cur.endMs = next.startMs;
+            // LINKED RIGHT EDGE: move the junction directly, resizing both without feedback
+            const nextEndF = next.startF! + next.durF!; // keep next's end fixed, trim its left
+            const minJunctionF = startF + minDurF; // cur must keep at least min duration
+            const maxJunctionByNextF = nextEndF - minDurF; // next must keep at least min duration
+            
+            // Only apply video duration constraint if the current block is a video
+            // Images can be resized unlimited, so don't constrain the junction
+            const maxJunctionByCurDurF = Number.isFinite(maxDurF) ? (startF + maxDurF) : Number.POSITIVE_INFINITY;
+            const junctionHighF = Math.min(maxJunctionByNextF, maxJunctionByCurDurF);
+
+
+            let junctionF = targetF;
+            junctionF = Math.max(minJunctionF, Math.min(junctionF, junctionHighF));
+
+            // If no effective change after quantization/clamp, exit early
+            if (junctionF === startF + cur.durF!) {
+              // ensure ms sync
+              cur.endMs = framesToMs(startF + cur.durF!, fps);
+              next.startMs = framesToMs(next.startF!, fps);
+              next.endMs = framesToMs(nextEndF, fps);
+              return;
+            }
+
+            // Resize current to end at the junction
+            cur.durF = junctionF - startF;
+            cur.endMs = framesToMs(junctionF, fps);
+
+            // Move next's start to the junction, keeping its end
+            next.startF = junctionF;
+            next.durF = Math.max(minDurF, nextEndF - next.startF);
+            next.startMs = framesToMs(next.startF, fps);
+            next.endMs = framesToMs(nextEndF, fps);
+
           } else {
             // not linked: don't affect next
-            cur.endMs = newEnd;
+            cur.durF = newEndF - startF;
+            cur.endMs = framesToMs(newEndF, fps);
 
             // magnet: close to next.start => snap + link (only within same track)
             if (next && next.trackId === cur.trackId) {
               const gap = next.startMs - cur.endMs; // >= 0 if separated
               if (gap >= 0 && gap <= snapMs) {
+                cur.durF = next.startF! - startF;
                 cur.endMs = next.startMs;
-                linkRight(cur, next, triggerSnapAnimation);
+                linkRight(cur, next, triggerSnapAnimation, fps);
               } else {
                 if (cur.linkRightId === next?.id && (gap > unlinkMs || gap < 0)) {
                   unlinkRight(cur, next);
@@ -870,7 +1003,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (!defaultTrack) {
       const trackCount = tracks.filter(t => t.type === trackType).length;
       const trackName = `${trackType === "video" ? "Media" : "Audio"} ${trackCount + 1}`;
-      const newTrack = { id: nanoid(), name: trackName, type: trackType };
+      const newTrack: Track = { id: nanoid(), name: trackName, type: trackType };
       
       // If this is the first track being created, only create the track type needed
       if (tracks.length === 0) {
@@ -918,7 +1051,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       allScenes: scenes.map(s => ({ id: s.id, trackId: s.trackId, startMs: s.startMs, endMs: s.endMs }))
     });
     
-    const scene = { 
+    const { fps } = get();
+    const scene: Scene = { 
       id, 
       startMs: at, 
       endMs: at + dflt, 
@@ -931,12 +1065,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ...(asset?.type === 'video' ? { originalDurationMs: dflt } : {})
     };
     
-    console.log('🎬 FINAL SCENE CREATION:', { 
+    // Ensure frame data for new scene
+    ensureFrameData(scene, fps);
+    
+    console.log('🎬 FINAL SCENE CREATION (FRAME-ACCURATE):', { 
       sceneId: id, 
       trackId: defaultTrack.id, 
       trackName: defaultTrack.name,
-      startMs: at, 
-      endMs: at + dflt,
+      startF: scene.startF,
+      durF: scene.durF,
+      startMs: scene.startMs, 
+      endMs: scene.endMs,
       isTrackEmpty,
       scenesInTrack: scenes.filter(s => s.trackId === finalTrackId).length
     });
@@ -959,7 +1098,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (!defaultTrack) {
       const trackCount = tracks.filter(t => t.type === trackType).length;
       const trackName = `Audio ${trackCount + 1}`;
-      const newTrack = { id: nanoid(), name: trackName, type: trackType };
+      const newTrack: Track = { id: nanoid(), name: trackName, type: trackType };
       
       // If this is the first track being created, only create the track type needed
       if (tracks.length === 0) {
@@ -994,23 +1133,50 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       allAudioClips: audioClips.map(a => ({ id: a.id, trackId: a.trackId, startMs: a.startMs, endMs: a.endMs }))
     });
     
-    const clip = { id, startMs: at, endMs: at + dflt, assetId, kind, originalDurationMs: dflt, trackId: defaultTrack.id };
-    set({ audioClips: [...get().audioClips, clip].sort((a,b)=>a.startMs-b.startMs) });
-    get().normalizeDuration();
-    set(state => ({ history: { ...state.history, future: [] }}));
+    const { fps } = get();
     
-    // Try to get actual audio duration and update the clip
+    // Try to get actual audio duration FIRST before creating the clip
     const asset = useAssetsStore.getState().getById(assetId);
-    if (asset && asset.url) {
+    let actualDurationMs = dflt;
+    
+    // FIRST: Check if waveform data already has the duration (most reliable)
+    const waveformData = useAssetsStore.getState().waveforms[assetId];
+    if (waveformData && waveformData.durationMs > 0) {
+      actualDurationMs = waveformData.durationMs;
+      console.log('🎵 Using duration from waveform data:', { assetId, durationMs: actualDurationMs });
+    }
+    
+    // If asset has a URL and we don't have duration yet, try to get it from audio metadata
+    if (asset && asset.url && actualDurationMs === dflt) {
       const audio = new Audio(asset.url);
+      // Set up async loading for duration
       audio.addEventListener('loadedmetadata', () => {
-        const actualDurationMs = audio.duration * 1000;
-        if (actualDurationMs > 0 && actualDurationMs !== Infinity) {
-          console.log('🎵 Loading actual audio duration:', { assetId, actualDurationMs });
+        const loadedDurationMs = audio.duration * 1000;
+        if (loadedDurationMs > 0 && loadedDurationMs !== Infinity) {
+          console.log('🎵 Loading actual audio duration:', { assetId, loadedDurationMs, clipId: id });
+          const currentFps = get().fps;
           set(state => ({
-            audioClips: state.audioClips.map(c => 
-              c.id === id ? { ...c, endMs: c.startMs + actualDurationMs, originalDurationMs: actualDurationMs } : c
-            )
+            audioClips: state.audioClips.map(c => {
+              if (c.id === id) {
+                const updated: AudioClip = { 
+                  ...c, 
+                  endMs: c.startMs + loadedDurationMs, 
+                  originalDurationMs: loadedDurationMs 
+                };
+                // Recalculate frames with new duration
+                ensureFrameData(updated, currentFps);
+                console.log('🎵 Updated audio clip with actual duration:', {
+                  clipId: id,
+                  oldDurF: c.durF,
+                  newDurF: updated.durF,
+                  oldEndMs: c.endMs,
+                  newEndMs: updated.endMs,
+                  originalDurationMs: loadedDurationMs
+                });
+                return updated;
+              }
+              return c;
+            })
           }));
           get().normalizeDuration();
         }
@@ -1021,6 +1187,33 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       // Load the audio to trigger metadata loading
       audio.load();
     }
+    
+    // Create the clip with the initial duration (will be updated when metadata loads)
+    const clip: AudioClip = { 
+      id, 
+      startMs: at, 
+      endMs: at + actualDurationMs, 
+      assetId, 
+      kind, 
+      originalDurationMs: actualDurationMs, 
+      trackId: defaultTrack.id 
+    };
+    
+    // Ensure frame data for new audio clip
+    ensureFrameData(clip, fps);
+    
+    console.log('🎵 Created audio clip:', {
+      clipId: id,
+      startF: clip.startF,
+      durF: clip.durF,
+      startMs: clip.startMs,
+      endMs: clip.endMs,
+      originalDurationMs: actualDurationMs
+    });
+    
+    set({ audioClips: [...get().audioClips, clip].sort((a,b)=>a.startMs-b.startMs) });
+    get().normalizeDuration();
+    set(state => ({ history: { ...state.history, future: [] }}));
     
     return id;
   },
@@ -1057,9 +1250,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   splitAt: (ms) => {
     const { selectedSceneId, selectedAudioId, scenes, audioClips, fps } = get();
     
-    // Calculate precise grid snapping for frame-accurate cuts
-    const frameMs = 1000 / fps; // milliseconds per frame
-    const snappedMs = snapToGrid(ms, frameMs);
+    // Calculate frame-accurate split point
+    const snappedF = msToFrames(ms, fps);
+    const snappedMs = framesToMs(snappedF, fps);
     
     // Try to split selected scene first
     if (selectedSceneId) {
@@ -1067,17 +1260,27 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (scene && snappedMs > scene.startMs && snappedMs < scene.endMs) {
         get().beginTx("Split scene at playhead");
         
-        const sceneA = {
+        const startF = scene.startF ?? msToFrames(scene.startMs, fps);
+        const splitF = snappedF;
+        const endF = startF + (scene.durF ?? msToFrames(scene.endMs - scene.startMs, fps));
+        
+        const sceneA: Scene = {
           ...scene,
           id: nanoid(),
+          startF: startF,
+          durF: splitF - startF,
+          startMs: framesToMs(startF, fps),
           endMs: snappedMs,
           linkRightId: null
         };
         
-        const sceneB = {
+        const sceneB: Scene = {
           ...scene,
           id: nanoid(),
+          startF: splitF,
+          durF: endF - splitF,
           startMs: snappedMs,
+          endMs: framesToMs(endF, fps),
           linkLeftId: null
         };
         
@@ -1103,27 +1306,39 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (audio && snappedMs > audio.startMs && snappedMs < audio.endMs) {
         get().beginTx("Split audio at playhead");
         
-        // Calculate the audio offset for each segment
+        const startF = audio.startF ?? msToFrames(audio.startMs, fps);
+        const splitF = snappedF;
+        const endF = startF + (audio.durF ?? msToFrames(audio.endMs - audio.startMs, fps));
+        
+        // Calculate the audio offset for each segment (stays in ms for sub-frame precision)
         const originalAudioOffset = audio.audioOffsetMs || 0;
         const timelineOffset = snappedMs - audio.startMs;
         
-        const audioA = {
+        const audioA: AudioClip = {
           ...audio,
           id: nanoid(),
+          startF: startF,
+          durF: splitF - startF,
+          startMs: framesToMs(startF, fps),
           endMs: snappedMs,
           audioOffsetMs: originalAudioOffset // First segment starts at original offset
         };
         
-        const audioB = {
+        const audioB: AudioClip = {
           ...audio,
           id: nanoid(),
+          startF: splitF,
+          durF: endF - splitF,
           startMs: snappedMs,
+          endMs: framesToMs(endF, fps),
           audioOffsetMs: originalAudioOffset + timelineOffset // Second segment continues from cut point
         };
         
-        console.log('🎵 AUDIO SPLIT DEBUG:', {
+        console.log('🎵 AUDIO SPLIT DEBUG (FRAME-ACCURATE):', {
           originalClip: { 
             id: audio.id,
+            startF: audio.startF,
+            durF: audio.durF,
             startMs: audio.startMs, 
             endMs: audio.endMs, 
             durationMs: audio.endMs - audio.startMs,
@@ -1131,9 +1346,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             assetId: audio.assetId
           },
           splitAt: snappedMs,
+          splitF: snappedF,
           timelineOffset,
           audioA: { 
             id: audioA.id,
+            startF: audioA.startF,
+            durF: audioA.durF,
             startMs: audioA.startMs, 
             endMs: audioA.endMs, 
             durationMs: audioA.endMs - audioA.startMs,
@@ -1142,6 +1360,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           },
           audioB: { 
             id: audioB.id,
+            startF: audioB.startF,
+            durF: audioB.durF,
             startMs: audioB.startMs, 
             endMs: audioB.endMs, 
             durationMs: audioB.endMs - audioB.startMs,
@@ -1179,12 +1399,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   shiftRightFrom: (ms, deltaMs) => {
-    const { scenes, audioClips } = get();
+    const { scenes, audioClips, fps } = get();
+    
+    // Convert delta to frames for precision
+    const deltaF = msToFrames(deltaMs, fps);
     
     // Shift scenes
     const newScenes = scenes.map(scene => {
       if (scene.startMs >= ms) {
-        return { ...scene, startMs: Math.max(0, scene.startMs + deltaMs), endMs: Math.max(0, scene.endMs + deltaMs) };
+        const startF = (scene.startF ?? msToFrames(scene.startMs, fps)) + deltaF;
+        const durF = scene.durF ?? msToFrames(scene.endMs - scene.startMs, fps);
+        return { 
+          ...scene, 
+          startF: Math.max(0, startF),
+          durF: durF,
+          startMs: Math.max(0, framesToMs(startF, fps)), 
+          endMs: Math.max(0, framesToMs(startF + durF, fps)) 
+        };
       }
       return scene;
     });
@@ -1192,7 +1423,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     // Shift audio clips
     const newAudioClips = audioClips.map(audio => {
       if (audio.startMs >= ms) {
-        return { ...audio, startMs: Math.max(0, audio.startMs + deltaMs), endMs: Math.max(0, audio.endMs + deltaMs) };
+        const startF = (audio.startF ?? msToFrames(audio.startMs, fps)) + deltaF;
+        const durF = audio.durF ?? msToFrames(audio.endMs - audio.startMs, fps);
+        return { 
+          ...audio, 
+          startF: Math.max(0, startF),
+          durF: durF,
+          startMs: Math.max(0, framesToMs(startF, fps)), 
+          endMs: Math.max(0, framesToMs(startF + durF, fps)) 
+        };
       }
       return audio;
     });
@@ -1272,7 +1511,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   duplicateSelection: () => {
-    const { selectedSceneId, selectedAudioId, scenes, audioClips } = get();
+    const { selectedSceneId, selectedAudioId, scenes, audioClips, fps } = get();
     
     if (selectedSceneId) {
       get().beginTx("Duplicate scene");
@@ -1280,14 +1519,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const scene = scenes.find(s => s.id === selectedSceneId);
       if (!scene) return;
       
-      const duration = scene.endMs - scene.startMs;
-      const newStartMs = scene.endMs;
+      const durF = scene.durF ?? msToFrames(scene.endMs - scene.startMs, fps);
+      const endF = (scene.startF ?? msToFrames(scene.startMs, fps)) + durF;
+      const newStartF = endF;
       
-      const duplicatedScene = {
+      const duplicatedScene: Scene = {
         ...scene,
         id: nanoid(),
-        startMs: newStartMs,
-        endMs: newStartMs + duration,
+        startF: newStartF,
+        durF: durF,
+        startMs: framesToMs(newStartF, fps),
+        endMs: framesToMs(newStartF + durF, fps),
         linkLeftId: null,
         linkRightId: null
       };
@@ -1302,14 +1544,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const audio = audioClips.find(a => a.id === selectedAudioId);
       if (!audio) return;
       
-      const duration = audio.endMs - audio.startMs;
-      const newStartMs = audio.endMs;
+      const durF = audio.durF ?? msToFrames(audio.endMs - audio.startMs, fps);
+      const endF = (audio.startF ?? msToFrames(audio.startMs, fps)) + durF;
+      const newStartF = endF;
       
-      const duplicatedAudio = {
+      const duplicatedAudio: AudioClip = {
         ...audio,
         id: nanoid(),
-        startMs: newStartMs,
-        endMs: newStartMs + duration
+        startF: newStartF,
+        durF: durF,
+        startMs: framesToMs(newStartF, fps),
+        endMs: framesToMs(newStartF + durF, fps)
       };
       
       const newAudioClips = [...audioClips, duplicatedAudio].sort((a, b) => a.startMs - b.startMs);
@@ -1323,20 +1568,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   selectAudio: (id) => set({ selectedAudioId: id, selectedSceneId: null }),
 
   moveAudio: (id, newStartMs, pxPerSec) => {
-    const { audioClips, durationMs, triggerSnapAnimation } = get();
+    const { audioClips, durationMs, triggerSnapAnimation, fps } = get();
     const audioIndex = audioClips.findIndex(a => a.id === id);
     if (audioIndex < 0) return;
 
     const audio = audioClips[audioIndex];
-    const audioDuration = audio.endMs - audio.startMs;
-    const newEndMs = newStartMs + audioDuration;
-    const adjustedStartMs = Math.max(0, newEndMs - audioDuration);
+    // Work in frames for precision
+    const newStartF = msToFrames(newStartMs, fps);
+    const durF = audio.durF ?? msToFrames(audio.endMs - audio.startMs, fps);
+    const adjustedStartF = Math.max(0, newStartF);
 
-    // Create updated audio
+    // Create updated audio with frame-accurate values
     const updatedAudio = {
       ...audio,
-      startMs: adjustedStartMs,
-      endMs: newEndMs
+      startF: adjustedStartF,
+      durF: durF,
+      startMs: framesToMs(adjustedStartF, fps),
+      endMs: framesToMs(adjustedStartF + durF, fps)
     };
 
     // Update audio array
@@ -1353,15 +1601,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const nextAudio = movedIndex < updatedAudioClips.length - 1 ? updatedAudioClips[movedIndex + 1] : null;
 
     const snapMs = pxToMs(SNAP_PX, pxPerSec);
-    const unlinkMs = pxToMs(UNLINK_PX, pxPerSec);
 
     // Check left edge magnetic linking
     if (prevAudio) {
       const gap = movedAudio.startMs - prevAudio.endMs;
       if (gap >= 0 && gap <= snapMs) {
-        // Snap & link to previous audio
-        movedAudio.startMs = prevAudio.endMs;
-        movedAudio.endMs = movedAudio.startMs + audioDuration;
+        // Snap to previous audio - frame-accurate
+        const prevEndF = (prevAudio.startF ?? msToFrames(prevAudio.startMs, fps)) + 
+                         (prevAudio.durF ?? msToFrames(prevAudio.endMs - prevAudio.startMs, fps));
+        movedAudio.startF = prevEndF;
+        movedAudio.startMs = framesToMs(prevEndF, fps);
+        movedAudio.endMs = framesToMs(prevEndF + durF, fps);
         if (triggerSnapAnimation) {
           triggerSnapAnimation(movedAudio.id);
           triggerSnapAnimation(prevAudio.id);
@@ -1373,9 +1623,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (nextAudio) {
       const gap = nextAudio.startMs - movedAudio.endMs;
       if (gap >= 0 && gap <= snapMs) {
-        // Snap & link to next audio
+        // Snap to next audio - frame-accurate
+        const nextStartF = nextAudio.startF ?? msToFrames(nextAudio.startMs, fps);
+        movedAudio.startF = nextStartF - durF;
+        movedAudio.startMs = framesToMs(movedAudio.startF, fps);
         movedAudio.endMs = nextAudio.startMs;
-        movedAudio.startMs = movedAudio.endMs - audioDuration;
         if (triggerSnapAnimation) {
           triggerSnapAnimation(movedAudio.id);
           triggerSnapAnimation(nextAudio.id);
@@ -1391,7 +1643,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       id, 
       from: audio.startMs, 
       to: movedAudio.startMs,
-      duration: audioDuration,
+      duration: framesToMs(durF, fps),
       newDurationMs: newDuration
     });
 
@@ -1408,7 +1660,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       pxPerSec
     });
     
-    const { audioClips: a, durationMs, triggerSnapAnimation } = get();
+    const { audioClips: a, durationMs, triggerSnapAnimation, fps } = get();
     const audioClips = [...a]; // Don't sort here, assume already sorted
 
     const i = audioClips.findIndex(ac => ac.id === id);
@@ -1418,60 +1670,115 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
 
     const cur = audioClips[i];
+    
+    // Ensure frame data exists
+    if (cur.startF === undefined || cur.durF === undefined) {
+      ensureFrameData(cur, fps);
+    }
+    
     console.log('🎵 RESIZE AUDIO TO: Found clip:', {
       id: cur.id,
+      startF: cur.startF,
+      durF: cur.durF,
       startMs: cur.startMs,
       endMs: cur.endMs,
       audioOffsetMs: cur.audioOffsetMs,
-      originalDurationMs: cur.originalDurationMs
+      originalDurationMs: cur.originalDurationMs,
+      trackId: cur.trackId
     });
-    const prev = audioClips[i-1];
-    const next = audioClips[i+1];
+    
+    // Find prev/next clips ON THE SAME TRACK ONLY
+    const prev = audioClips.slice(0, i).reverse().find(ac => ac.trackId === cur.trackId);
+    const next = audioClips.slice(i + 1).find(ac => ac.trackId === cur.trackId);
 
     // Use the stored original duration to constrain resizing
-    const maxDurationMs = cur.originalDurationMs || Infinity;
+    const audioOffsetMs = cur.audioOffsetMs || 0;
+    const originalDurationMs = cur.originalDurationMs || Infinity;
+    const minDurF = msToFrames(minMs, fps);
+    
+    console.log('🎵 RESIZE AUDIO CONSTRAINTS:', {
+      clipId: cur.id,
+      originalDurationMs,
+      audioOffsetMs,
+      minDurF,
+      currentDurF: cur.durF
+    });
 
     const snapMs = pxToMs(SNAP_PX, pxPerSec);
-    const unlinkMs = pxToMs(UNLINK_PX, pxPerSec);
 
     if (edge === "left") {
-      const low  = prev ? (prev.startMs + minMs) : 0;
-      const high = cur.endMs - minMs;
-      // Don't exceed original audio duration - use original duration, not current
-      const maxStartMs = cur.endMs - maxDurationMs;
-
-      // snap, then clamp
-      let newStart = snapToGrid(targetMs, gridMs);
-      newStart = bounds(newStart, Math.max(low, maxStartMs), high);
-
-      // Calculate the change in timeline position
-      const timelineOffsetChange = newStart - cur.startMs;
+      // Work in frames for precision
+      const targetF = msToFrames(targetMs, fps);
+      const endF = cur.startF! + cur.durF!;
       
-      // Update audioOffsetMs to reflect the trim
+      // Calculate bounds in frames
+      const prevEndF = prev ? ((prev.startF ?? msToFrames(prev.startMs, fps)) + (prev.durF ?? msToFrames(prev.endMs - prev.startMs, fps))) : 0;
+      const lowF = prev ? prevEndF : 0; // Can't go before previous clip
+      const highF = endF - minDurF; // Can't make duration less than minDurF
+      
+      // For left edge expansion: we need to check how much we can "reveal" from the audio offset
+      // Maximum expansion is when audioOffsetMs reaches 0 (showing the very start of the audio)
+      // So minStartF should be calculated considering that we can expand until audioOffsetMs = 0
+      const currentOffsetFrames = msToFrames(audioOffsetMs, fps);
+      const minStartF = cur.startF! - currentOffsetFrames; // Earliest we can go (when offset = 0)
+      
+      console.log('🔍 LEFT EDGE CONSTRAINTS:', {
+        clipId: cur.id,
+        targetF,
+        targetMs,
+        currentStartF: cur.startF,
+        currentOffsetMs: audioOffsetMs,
+        currentOffsetFrames,
+        endF,
+        lowF: `${lowF} (prev end)`,
+        highF: `${highF} (min dur)`,
+        minStartF: `${minStartF} (max expansion when offset=0)`,
+        currentDurF: cur.durF
+      });
+
+      // Quantize to frame and clamp
+      let newStartF = targetF;
+      // Clamp: can't go before prev (lowF), can't expand beyond audio start (minStartF), can't go past highF (min duration)
+      newStartF = Math.max(Math.max(lowF, minStartF), Math.min(newStartF, highF));
+
+      // Calculate the change in timeline position IN MILLISECONDS (for audioOffsetMs)
+      const oldStartMs = framesToMs(cur.startF!, fps);
+      const newStartMs = framesToMs(newStartF, fps);
+      const timelineOffsetChange = newStartMs - oldStartMs;
+      
+      // Update audioOffsetMs to reflect the trim (stays in ms for sub-frame audio precision)
       const currentAudioOffset = cur.audioOffsetMs || 0;
       const newAudioOffset = currentAudioOffset + timelineOffsetChange;
       
-      console.log('🎵 LEFT EDGE TRIM DEBUG:', {
+      console.log('🎵 LEFT EDGE TRIM DEBUG (FRAME-ACCURATE):', {
         clipId: cur.id,
-        oldStartMs: cur.startMs,
-        newStartMs: newStart,
-        timelineOffsetChange: timelineOffsetChange,
+        oldStartF: cur.startF,
+        newStartF: newStartF,
+        oldStartMs,
+        newStartMs,
+        timelineOffsetChange,
         oldAudioOffsetMs: currentAudioOffset,
         newAudioOffsetMs: newAudioOffset,
-        clipDurationMs: cur.endMs - cur.startMs
+        clipDurationMs: framesToMs(cur.durF!, fps)
       });
 
-      cur.startMs = newStart;
+      cur.startF = newStartF;
+      cur.durF = endF - newStartF;
+      cur.startMs = newStartMs;
+      cur.endMs = framesToMs(endF, fps);
       cur.audioOffsetMs = newAudioOffset;
 
       // magnet: if close enough to prev.end => snap + link
       if (prev) {
         const gap = cur.startMs - prev.endMs; // >= 0 if separated
         if (gap >= 0 && gap <= snapMs) {
-          // snap & link
-          cur.startMs = prev.endMs;
-          // Recalculate audioOffsetMs after magnetic snap
-          const snapOffsetChange = cur.startMs - newStart;
+          // snap & link - recalculate audioOffsetMs after snap
+          const snapStartF = prevEndF;
+          const snapStartMs = framesToMs(snapStartF, fps);
+          const snapOffsetChange = snapStartMs - newStartMs;
+          cur.startF = snapStartF;
+          cur.durF = endF - snapStartF;
+          cur.startMs = snapStartMs;
           cur.audioOffsetMs = newAudioOffset + snapOffsetChange;
           
           if (triggerSnapAnimation) {
@@ -1481,26 +1788,48 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         }
       }
     } else {
-      // RIGHT EDGE
-      const low  = cur.startMs + minMs;
-      const high = next ? (next.endMs - minMs) : Number.MAX_SAFE_INTEGER;
-      // Don't exceed original audio duration - use original duration, not current
-      const maxEndMs = cur.startMs + maxDurationMs;
+      // RIGHT EDGE - frame-accurate
+      const targetF = msToFrames(targetMs, fps);
+      const startF = cur.startF!;
+      
+      // Calculate bounds in frames
+      const lowF = startF + minDurF; // Minimum duration
+      const nextStartF = next ? (next.startF ?? msToFrames(next.startMs, fps)) : Number.MAX_SAFE_INTEGER;
+      const highF = next ? (nextStartF - minDurF) : Number.MAX_SAFE_INTEGER; // Can't overlap with next clip
+      
+      // For right edge: max extension is when we've used all of the original audio
+      // Current position in audio = audioOffsetMs
+      // Remaining audio = originalDurationMs - audioOffsetMs
+      const remainingDurationMs = originalDurationMs - audioOffsetMs;
+      const maxDurF = msToFrames(remainingDurationMs, fps);
+      const maxEndF = startF + maxDurF; // Can't extend beyond original audio length
 
-      let newEnd = snapToGrid(targetMs, gridMs);
-      newEnd = bounds(newEnd, low, Math.min(high, maxEndMs));
-
-      console.log('🎵 RIGHT EDGE TRIM DEBUG:', {
+      console.log('🔍 RIGHT EDGE CONSTRAINTS:', {
         clipId: cur.id,
-        oldEndMs: cur.endMs,
-        newEndMs: newEnd,
-        oldAudioOffsetMs: cur.audioOffsetMs || 0,
-        clipDurationMs: cur.endMs - cur.startMs,
-        newDurationMs: newEnd - cur.startMs,
-        note: 'audioOffsetMs stays the same for right edge trim'
+        targetF, 
+        startF,
+        audioOffsetMs,
+        originalDurationMs,
+        remainingDurationMs,
+        lowF: `${lowF} (min dur)`, 
+        highF: `${highF} (next clip)`, 
+        maxEndF: `${maxEndF} (audio length)`,
+        maxDurF,
+        nextStartF,
+        hasNext: !!next
       });
 
-      cur.endMs = newEnd;
+      let newEndF = targetF;
+      newEndF = Math.max(lowF, Math.min(newEndF, Math.min(highF, maxEndF)));
+
+      console.log('🔍 RIGHT EDGE RESULT:', 
+        'newEndF:', newEndF, 
+        'newDurF:', newEndF - startF,
+        'clamped by:', newEndF === lowF ? 'lowF (MIN)' : newEndF === highF ? 'highF (NEXT CLIP)' : newEndF === maxEndF ? 'maxEndF (AUDIO LENGTH)' : 'target'
+      );
+
+      cur.durF = newEndF - startF;
+      cur.endMs = framesToMs(newEndF, fps);
       // Note: audioOffsetMs stays the same for right edge trimming
       // Only the visible duration changes, not the starting point in the audio file
 
@@ -1508,6 +1837,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (next) {
         const gap = next.startMs - cur.endMs; // >= 0 if separated
         if (gap >= 0 && gap <= snapMs) {
+          cur.durF = nextStartF - startF;
           cur.endMs = next.startMs;
           if (triggerSnapAnimation) {
             triggerSnapAnimation(cur.id);
@@ -1517,8 +1847,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
     }
 
-    console.log('🎵 RESIZE AUDIO TO: Final clip state:', {
+    console.log('🎵 RESIZE AUDIO TO: Final clip state (FRAME-ACCURATE):', {
       id: cur.id,
+      startF: cur.startF,
+      durF: cur.durF,
       startMs: cur.startMs,
       endMs: cur.endMs,
       audioOffsetMs: cur.audioOffsetMs,

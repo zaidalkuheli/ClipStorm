@@ -367,7 +367,7 @@ export function AudioBlocks({ trackId }: { trackId?: string }) {
         if (!currentTrack) return;
         
         // Find target track based on Y position
-        const trackElements = document.querySelectorAll('[data-track-id]');
+        const trackElements = Array.from(document.querySelectorAll('[data-track-id]')) as HTMLElement[];
         let targetTrackId = currentTrack.id;
         
         for (const trackEl of trackElements) {
@@ -531,6 +531,16 @@ export function AudioBlocks({ trackId }: { trackId?: string }) {
           const colorIndex = index % AUDIO_COLORS.length;
           const colors = AUDIO_COLORS[colorIndex];
 
+          console.log('🎵 AUDIO BLOCK RENDER:', {
+            clipId: a.id,
+            left: left,
+            width: width,
+            colors: colors,
+            pxPerSec: pxPerSec,
+            durationMs: a.endMs - a.startMs,
+            isSelected: isSelected
+          });
+
           // Get asset data for audio info
           const asset = a.assetId ? getAssetById(a.assetId) : null;
 
@@ -586,19 +596,29 @@ export function AudioBlocks({ trackId }: { trackId?: string }) {
               <div className="absolute inset-0 bg-black/20" />
 
               {/* Waveform Canvas */}
-              <WaveformCanvas clip={a} pxPerSec={pxPerSec} height={40} />
+              <WaveformCanvas clip={a} pxPerSec={pxPerSec} height={40} bgColor={colors.bg} />
 
               {/* smaller, precise resize handles */}
               <div
-                className={clsx("absolute left-0 top-0 h-full w-2 cursor-ew-resize bg-white/0 hover:bg-white/20 handle z-50 transition-colors", {
-                  "pl-0": isFirstBlock // ensure first block's left handle is fully accessible
-                })}
+                className={clsx(
+                  "absolute left-0 top-0 h-full w-2 cursor-ew-resize bg-transparent handle z-50 transition-colors",
+                  {
+                    // Only show a subtle dark hover when block is wide enough; avoid whitening tiny clips
+                    "hover:bg-black/20": width >= 8,
+                    "pl-0": isFirstBlock
+                  }
+                )}
                 onPointerDown={(e)=>onPointerDown(e, a.id, "left")}
               />
               <div
-                className={clsx("absolute right-0 top-0 h-full w-2 cursor-ew-resize bg-white/0 hover:bg-white/20 handle z-50 transition-colors", {
-                  "pr-0": isLastBlock // ensure last block's right handle is fully accessible
-                })}
+                className={clsx(
+                  "absolute right-0 top-0 h-full w-2 cursor-ew-resize bg-transparent handle z-50 transition-colors",
+                  {
+                    // Only show a subtle dark hover when block is wide enough; avoid whitening tiny clips
+                    "hover:bg-black/20": width >= 8,
+                    "pr-0": isLastBlock
+                  }
+                )}
                 onPointerDown={(e)=>onPointerDown(e, a.id, "right")}
               />
 

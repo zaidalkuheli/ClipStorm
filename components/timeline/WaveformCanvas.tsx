@@ -7,9 +7,10 @@ interface WaveformCanvasProps {
   clip: AudioClip;
   pxPerSec: number;
   height?: number;
+  bgColor?: string; // background color to match parent block
 }
 
-export function WaveformCanvas({ clip, pxPerSec, height = 40 }: WaveformCanvasProps) {
+export function WaveformCanvas({ clip, pxPerSec, height = 40, bgColor }: WaveformCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const getAssetById = useAssetsStore(s => s.getById);
   const waveforms = useAssetsStore(s => s.waveforms);
@@ -28,6 +29,8 @@ export function WaveformCanvas({ clip, pxPerSec, height = 40 }: WaveformCanvasPr
     clipStartMs: clip.startMs,
     clipEndMs: clip.endMs,
     clipDurationMs: clip.endMs - clip.startMs,
+    pxPerSec: pxPerSec,
+    bgColor: bgColor,
     clipObject: clip
   });
 
@@ -48,11 +51,25 @@ export function WaveformCanvas({ clip, pxPerSec, height = 40 }: WaveformCanvasPr
       return;
     }
 
+    // Set canvas size with limits to prevent browser rendering issues
+    const rect = canvas.getBoundingClientRect();
+    
+    // Limit canvas dimensions to prevent browser rendering limits (max ~32k pixels)
+    const MAX_CANVAS_WIDTH = 32000;
+    const MAX_CANVAS_HEIGHT = 32000;
+    const limitedWidth = Math.min(rect.width, MAX_CANVAS_WIDTH);
+    const limitedHeight = Math.min(rect.height, MAX_CANVAS_HEIGHT);
+    
     console.log('🎵 Starting waveform render:', {
       clipId: clip.id,
       canvasSize: { width: canvas.clientWidth, height: canvas.clientHeight },
+      canvasRect: { width: rect.width, height: rect.height },
+      limitedSize: { width: limitedWidth, height: limitedHeight },
+      devicePixelRatio: window.devicePixelRatio,
       waveformBins: waveform.mins.length,
-      waveformDuration: waveform.durationMs
+      waveformDuration: waveform.durationMs,
+      bgColor: bgColor,
+      pxPerSec: pxPerSec
     });
 
     const ctx = canvas.getContext('2d');
@@ -60,15 +77,19 @@ export function WaveformCanvas({ clip, pxPerSec, height = 40 }: WaveformCanvasPr
       console.log('🎵 No canvas context');
       return;
     }
-
-    // Set canvas size
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * window.devicePixelRatio;
-    canvas.height = rect.height * window.devicePixelRatio;
+    canvas.width = limitedWidth * window.devicePixelRatio;
+    canvas.height = limitedHeight * window.devicePixelRatio;
     ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
 
-    // Clear canvas
-    ctx.clearRect(0, 0, rect.width, rect.height);
+    // Clear + paint background to match the parent block color
+    ctx.clearRect(0, 0, limitedWidth, limitedHeight);
+    if (bgColor) {
+      ctx.fillStyle = bgColor;
+      ctx.fillRect(0, 0, limitedWidth, limitedHeight);
+      console.log('🎵 BACKGROUND PAINTED:', { clipId: clip.id, bgColor, width: limitedWidth, height: limitedHeight });
+    } else {
+      console.log('🎵 NO BACKGROUND COLOR PROVIDED:', { clipId: clip.id });
+    }
 
     // Calculate which portion of the waveform to show based on audio offset
     const audioOffsetMs = clip.audioOffsetMs || 0;
@@ -106,11 +127,12 @@ export function WaveformCanvas({ clip, pxPerSec, height = 40 }: WaveformCanvasPr
       const fallbackVisibleBins = waveform.mins.length;
       
       // Draw the entire waveform as fallback
+      // Background is already painted above; just stroke lines
       for (let i = 0; i < fallbackVisibleBins; i++) {
         const min = waveform.mins[i];
         const max = waveform.maxs[i];
         
-        const x = (i / fallbackVisibleBins) * rect.width;
+        const x = (i / fallbackVisibleBins) * limitedWidth;
         const topY = centerY - (max * maxHeight / 2);
         const bottomY = centerY - (min * maxHeight / 2);
         
@@ -124,8 +146,8 @@ export function WaveformCanvas({ clip, pxPerSec, height = 40 }: WaveformCanvasPr
     }
 
     // Draw waveform with minimal padding (filename only shows on hover)
-    const centerY = rect.height / 2;
-    const maxHeight = rect.height * 0.8; // Use more of the available space
+    const centerY = limitedHeight / 2;
+    const maxHeight = limitedHeight * 0.8; // Use more of the available space
 
     ctx.fillStyle = '#3b82f6'; // Blue color for waveform
     ctx.strokeStyle = '#3b82f6';
@@ -145,7 +167,7 @@ export function WaveformCanvas({ clip, pxPerSec, height = 40 }: WaveformCanvasPr
       const max = waveform.maxs[binIndex];
       
       // Convert to pixel coordinates (relative to the visible portion)
-      const x = (i / visibleBins) * rect.width;
+      const x = (i / visibleBins) * limitedWidth;
       const topY = centerY - (max * maxHeight / 2);
       const bottomY = centerY - (min * maxHeight / 2);
       
@@ -156,7 +178,13 @@ export function WaveformCanvas({ clip, pxPerSec, height = 40 }: WaveformCanvasPr
       ctx.stroke();
     }
     
-    console.log('🎵 Waveform segment drawing complete');
+    console.log('🎵 Waveform segment drawing complete:', { 
+      clipId: clip.id, 
+      visibleBins, 
+      canvasWidth: limitedWidth, 
+      canvasHeight: limitedHeight,
+      bgColor: bgColor 
+    });
 
   }, [clip.id, clip.startMs, clip.endMs, clip.audioOffsetMs, pxPerSec, height, waveform]);
 
@@ -175,9 +203,9 @@ export function WaveformCanvas({ clip, pxPerSec, height = 40 }: WaveformCanvasPr
   }, [clip.id, clip.startMs, clip.endMs, clip.audioOffsetMs, pxPerSec, height, waveform]);
 
   if (!waveform) {
-    // Show loading or placeholder
+    // Show loading or placeholder that matches parent color
     return (
-      <div className="absolute inset-0 flex items-center justify-center">
+      <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: bgColor }}>
         <div className="text-xs text-white/60">Loading waveform...</div>
       </div>
     );
@@ -187,7 +215,7 @@ export function WaveformCanvas({ clip, pxPerSec, height = 40 }: WaveformCanvasPr
     <canvas
       ref={canvasRef}
       className="absolute inset-0 w-full h-full"
-      style={{ width: '100%', height: '100%' }}
+      style={{ width: '100%', height: '100%', backgroundColor: bgColor || 'transparent' }}
     />
   );
 }
