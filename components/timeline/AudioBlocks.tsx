@@ -275,7 +275,7 @@ export function AudioBlocks({ trackId }: { trackId?: string }) {
     
     document.addEventListener('pointerup', handleGlobalPointerUp);
     
-    console.log('🎵 Fade handle drag started:', { id, fadeType, startFadeMs: fadeDragRef.current.startFadeMs });
+    console.log('Fade handle drag started:', { id, fadeType, startFadeMs: fadeDragRef.current.startFadeMs });
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -531,7 +531,7 @@ export function AudioBlocks({ trackId }: { trackId?: string }) {
           const colorIndex = index % AUDIO_COLORS.length;
           const colors = AUDIO_COLORS[colorIndex];
 
-          console.log('🎵 AUDIO BLOCK RENDER:', {
+          console.log('AUDIO BLOCK RENDER:', {
             clipId: a.id,
             left: left,
             width: width,

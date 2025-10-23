@@ -4,7 +4,9 @@ import { useEditorStore } from "@/stores/editorStore";
 import { useAssetsStore } from "@/stores/assetsStore";
 import { msToFrames } from "@/lib/timebase";
 import { muxAvcChunksToMp4 } from "@/lib/mp4Mux";
-import { muxVp9ChunksToWebm } from "@/lib/webmMux";
+import { muxVp9ChunksToWebm, muxVp9OpusToWebm } from "@/lib/webmMux";
+import { renderTimelineAudioBuffer } from "@/lib/audioRender";
+import { encodeAudioBufferToOpusChunks } from "@/lib/opusEncode";
 
 /**
  * Check if WebCodecs VideoEncoder is supported
@@ -57,87 +59,70 @@ export async function renderTimelineToWebM(opts: {
   const editorState = useEditorStore.getState();
   const assetsState = useAssetsStore.getState();
   
-  const { scenes, durationMs, fps, resolution } = editorState;
+  const { scenes, durationMs, fps, resolution, aspect } = editorState;
   
-  // Parse resolution
-  const [width, height] = resolution.split('x').map(Number);
+  // Parse resolution and normalize to selected aspect ratio
+  const [resW, resH] = resolution.split('x').map(Number);
+  const [arW, arH] = (aspect || '9:16').split(':').map(Number);
+  const longSide = Math.max(resW, resH);
+  const shortSide = Math.min(resW, resH);
+  const makeEven = (n: number) => (n % 2 === 0 ? n : n - 1);
+  let width = resW;
+  let height = resH;
+  if (arW === arH) {
+    // 1:1: pick the smaller side to avoid unintended upscales
+    const side = makeEven(shortSide);
+    width = side;
+    height = side;
+  } else if (arW > arH) {
+    // Landscape e.g., 16:9 → width = longSide, height scaled
+    width = makeEven(longSide);
+    height = makeEven(Math.round((longSide * arH) / arW));
+  } else {
+    // Portrait e.g., 9:16 → height = longSide, width scaled
+    height = makeEven(longSide);
+    width = makeEven(Math.round((longSide * arW) / arH));
+  }
+  if (width <= 0 || height <= 0) {
+    throw new Error(`Invalid target dimensions computed for aspect ${aspect} from resolution ${resolution}`);
+  }
   
-  // Determine visual duration using IMAGE SCENES ONLY (ignore audio length)
-  const imageScenesForDuration = scenes.filter(s => {
+  // Determine visual duration using image and video scenes (ignore audio length)
+  const visualScenesForDuration = scenes.filter(s => {
     const asset = s.assetId ? assetsState.getById(s.assetId) : null;
-    return asset && asset.type === 'image';
+    return asset && (asset.type === 'image' || asset.type === 'video');
   });
 
-  // Compute total frames from image scene frame data when available; fallback to ms
+  // Compute total frames from visual scene frame data when available
   let totalFrames = 0;
-  if (imageScenesForDuration.length > 0) {
+  if (visualScenesForDuration.length > 0) {
     totalFrames = Math.max(
       0,
-      ...imageScenesForDuration.map(s => {
+      ...visualScenesForDuration.map(s => {
         const startF = s.startF !== undefined ? s.startF : msToFrames(s.startMs, fps);
         const durF = s.durF !== undefined ? s.durF : msToFrames(Math.max(0, s.endMs - s.startMs), fps);
         return startF + durF;
       })
     );
   } else {
-    // No image scenes; nothing to render
     totalFrames = 0;
   }
   const durationSec = totalFrames / fps;
   
-  console.log('🎬 Starting video render:', {
-    width,
-    height,
-    fps,
-    durationMs,
-    totalFrames,
-    scenesCount: scenes.length,
-    resolution
-  });
   
-  // Filter to only image scenes
+  // Partition scenes by asset type
   const imageScenes = scenes.filter(scene => {
     const asset = scene.assetId ? assetsState.getById(scene.assetId) : null;
     return asset && asset.type === 'image';
   });
-  
-  console.log('🎬 Image scenes:', imageScenes.length);
-  
-  // EXTENSIVE DEBUG LOGGING
-  console.log('🎬 DETAILED SCENE ANALYSIS:', {
-    totalScenes: scenes.length,
-    imageScenesCount: imageScenes.length,
-    imageScenes: imageScenes.map(s => ({
-      id: s.id,
-      startMs: s.startMs,
-      endMs: s.endMs,
-      durationMs: s.endMs - s.startMs,
-      startF: s.startF,
-      durF: s.durF,
-      assetId: s.assetId,
-      assetName: s.assetId ? assetsState.getById(s.assetId)?.name : 'unknown'
-    }))
-  });
-
-  // Calculate expected timeline duration from image scenes
-  const maxImageEndMs = Math.max(...imageScenes.map(s => s.endMs));
-  const minImageStartMs = Math.min(...imageScenes.map(s => s.startMs));
-  const imageTimelineDurationMs = maxImageEndMs - minImageStartMs;
-  
-  console.log('🎬 TIMELINE DURATION ANALYSIS:', {
-    minImageStartMs,
-    maxImageEndMs,
-    imageTimelineDurationMs,
-    imageTimelineDurationSec: imageTimelineDurationMs / 1000,
-    totalFramesFromDuration: Math.ceil(imageTimelineDurationMs * fps / 1000),
-    totalFramesCalculated: totalFrames,
-    framesMatch: Math.ceil(imageTimelineDurationMs * fps / 1000) === totalFrames,
-    projectDurationMs: durationMs,
-    projectDurationSec: durationMs / 1000
+  const videoScenes = scenes.filter(scene => {
+    const asset = scene.assetId ? assetsState.getById(scene.assetId) : null;
+    return asset && asset.type === 'video';
   });
   
-  if (imageScenes.length === 0) {
-    throw new Error('No image clips found in timeline. Video export currently only supports image clips.');
+  
+  if (imageScenes.length === 0 && videoScenes.length === 0) {
+    throw new Error('No visual clips found in timeline.');
   }
   
   // Canvas for frame rendering (offscreen)
@@ -158,7 +143,30 @@ export async function renderTimelineToWebM(opts: {
     if (!imageAssets.has(asset.id)) {
       const img = await loadImage(asset.url);
       imageAssets.set(asset.id, img);
-      console.log('🎬 Loaded image:', asset.name, img.width, 'x', img.height);
+    }
+  }
+
+  // Prepare video elements (metadata only; frame sampling via seek + draw)
+  const videoElements = new Map<string, HTMLVideoElement>();
+  const videoSeekReady = new Map<string, Promise<void>>();
+  for (const scene of videoScenes) {
+    if (!scene.assetId) continue;
+    const asset = assetsState.getById(scene.assetId);
+    if (!asset || asset.type !== 'video') continue;
+    if (!videoElements.has(asset.id)) {
+      const v = document.createElement('video');
+      v.preload = 'auto';
+      v.crossOrigin = 'anonymous';
+      v.muted = true;
+      (v as any).playsInline = true;
+      v.src = asset.url;
+      videoElements.set(asset.id, v);
+      await new Promise<void>((resolve) => {
+        const onLoaded = () => { v.removeEventListener('loadedmetadata', onLoaded); resolve(); };
+        v.addEventListener('loadedmetadata', onLoaded);
+        // kick off
+        v.load();
+      });
     }
   }
   
@@ -212,20 +220,12 @@ export async function renderTimelineToWebM(opts: {
   const useAvc = avcSupported && !!avcConfig;
   const configToUse = useAvc ? (avcConfig as VideoEncoderConfig) : vp9Config;
   
-  console.log('🎬 Using encoder:', useAvc ? 'H.264 (MP4)' : 'VP9 (WebM)');
   
   await encoder.configure(configToUse as any);
 
   // CFR timing (microseconds)
   const frameDurationUs = Math.round(1_000_000 / fps);
   
-  // Render and encode offline (no real-time pacing)
-  console.log('🎬 STARTING FRAME-BY-FRAME ENCODING:', {
-    totalFrames,
-    frameDurationUs,
-    frameDurationMs: frameDurationUs / 1000,
-    expectedVideoDurationSec: totalFrames / fps
-  });
 
   let framesWithContent = 0;
   let lastContentFrame = -1;
@@ -254,8 +254,71 @@ export async function renderTimelineToWebM(opts: {
         renderSceneToCanvas(ctx, img, scene, width, height);
         frameHasContent = true;
         
-        if (frameIndex % 30 === 0) { // Log every 30 frames
-          console.log(`🎬 Frame ${frameIndex}: Drawing scene ${scene.id} at ${tMs}ms (${(tMs/1000).toFixed(2)}s)`);
+      }
+    }
+
+    // Draw visible video scenes (extract frame)
+    for (const scene of videoScenes) {
+      if (tMs >= scene.startMs && tMs < scene.endMs) {
+        const asset = scene.assetId ? assetsState.getById(scene.assetId) : null;
+        if (!asset) {
+          console.warn(`🎬 Video scene ${scene.id} has no asset`);
+          continue;
+        }
+        const v = videoElements.get(asset.id);
+        if (!v) {
+          console.warn(`🎬 Video element not found for asset ${asset.id} (${asset.name})`);
+          continue;
+        }
+        const sceneOffsetMs = (scene.videoOffsetMs ?? 0) + (tMs - scene.startMs);
+        let mediaTimeSec = Math.max(0, sceneOffsetMs / 1000);
+        const durSec = isFinite(v.duration) ? v.duration : Infinity;
+        
+        
+        if (isFinite(durSec)) {
+          // Avoid seeking exactly to end which may yield black frame
+          mediaTimeSec = Math.min(mediaTimeSec, Math.max(0, durSec - (1 / fps)));
+        }
+        if (mediaTimeSec >= 0 && mediaTimeSec < durSec) {
+          // Seek and wait for 'seeked' to guarantee frame is available
+          if (Math.abs(v.currentTime - mediaTimeSec) > 0.002) {
+            await new Promise<void>((resolve) => {
+              let done = false;
+              const cleanup = () => {
+                if (done) return; done = true;
+                v.removeEventListener('seeked', onSeeked);
+                v.removeEventListener('loadeddata', onLoadedData);
+                v.removeEventListener('canplay', onCanPlay);
+                resolve();
+              };
+              const onSeeked = () => { 
+                if (v.readyState >= 2) cleanup(); 
+              };
+              const onLoadedData = () => { 
+                if (v.readyState >= 2) cleanup(); 
+              };
+              const onCanPlay = () => { 
+                if (v.readyState >= 2) cleanup(); 
+              };
+              v.addEventListener('seeked', onSeeked);
+              v.addEventListener('loadeddata', onLoadedData);
+              v.addEventListener('canplay', onCanPlay);
+              try { 
+                v.currentTime = mediaTimeSec; 
+              } catch (e) { 
+                console.warn(`Video seek failed:`, e);
+                cleanup(); 
+              }
+              // Fallback timeout in case events don't fire quickly
+              setTimeout(() => {
+                cleanup();
+              }, 200);
+            });
+          }
+          
+          // Draw video frame via same transform method
+          renderSceneToCanvas(ctx as any, v as any, scene, width, height);
+          frameHasContent = true;
         }
       }
     }
@@ -287,69 +350,29 @@ export async function renderTimelineToWebM(opts: {
     }
   }
 
-  console.log('🎬 ENCODING COMPLETE - CONTENT ANALYSIS:', {
-    totalFramesEncoded: totalFrames,
-    framesWithContent,
-    firstContentFrame,
-    lastContentFrame,
-    contentDurationFrames: lastContentFrame - firstContentFrame + 1,
-    contentDurationSec: (lastContentFrame - firstContentFrame + 1) / fps,
-    expectedVideoDurationSec: totalFrames / fps,
-    emptyFramesAtStart: firstContentFrame,
-    emptyFramesAtEnd: totalFrames - lastContentFrame - 1
-  });
 
   await encoder.flush();
   encoder.close();
 
   if (onProgress) onProgress({ currentFrame: totalFrames, totalFrames, percent: 99, stage: 'muxing' });
 
-  console.log('🎬 MUXING ANALYSIS:', {
-    chunksCount: chunks.length,
-    useAvc,
-    codec: useAvc ? 'H.264' : 'VP9',
-    container: useAvc ? 'MP4' : 'WebM',
-    chunks: chunks.map(({chunk}, i) => ({
-      index: i,
-      timestamp: chunk.timestamp,
-      duration: chunk.duration || 0,
-      type: chunk.type,
-      timestampMs: chunk.timestamp / 1000,
-      durationMs: (chunk.duration || 0) / 1000
-    }))
-  });
 
-  // Mux to appropriate container
+  // Decide if audio is present: any timeline audio clips or video audio requested in future
+  const hasAudio = useEditorStore.getState().audioClips.length > 0 || videoScenes.length > 0;
   let blob: Blob;
-  if (useAvc) {
-    // MP4 (H.264) path
-    console.log('🎬 Muxing to MP4 (H.264)...');
+  if (!hasAudio && useAvc) {
+    // MP4 (H.264) silent path
+    console.log('🎬 Muxing to MP4 (H.264) - silent');
     const onlyChunks = chunks.map(c => c.chunk);
     blob = await muxAvcChunksToMp4({ chunks: onlyChunks, width, height, fps });
   } else {
-    // WebM (VP9) fallback - deterministic offline muxing
-    console.log('🎬 Muxing to WebM (VP9) using webm-muxer...');
-    blob = muxVp9ChunksToWebm({ chunks, width, height, fps, codec: 'V_VP9' });
+    // WebM path with audio when present
+    const audioBuffer = await renderTimelineAudioBuffer({ sampleRate: 48000 });
+    const opusChunks = await encodeAudioBufferToOpusChunks(audioBuffer);
+    blob = muxVp9OpusToWebm({ video: chunks, audio: opusChunks, width, height, fps });
   }
 
   if (onProgress) onProgress({ currentFrame: totalFrames, totalFrames, percent: 100, stage: 'complete' });
-  
-  console.log('🎬 FINAL EXPORT ANALYSIS:', {
-    blobSize: blob.size,
-    blobType: blob.type,
-    blobSizeMB: (blob.size / 1024 / 1024).toFixed(2),
-    totalFramesEncoded: totalFrames,
-    expectedDurationSec: totalFrames / fps,
-    expectedDurationMin: (totalFrames / fps / 60).toFixed(2),
-    framesWithContent,
-    contentDurationSec: framesWithContent / fps,
-    emptyFramesAtStart: firstContentFrame,
-    emptyFramesAtEnd: totalFrames - lastContentFrame - 1,
-    timelineDurationSec: imageTimelineDurationMs / 1000,
-    timelineDurationMin: (imageTimelineDurationMs / 1000 / 60).toFixed(2),
-    projectDurationSec: durationMs / 1000,
-    projectDurationMin: (durationMs / 1000 / 60).toFixed(2)
-  });
 
   return blob;
 }
@@ -359,7 +382,7 @@ export async function renderTimelineToWebM(opts: {
  */
 function renderSceneToCanvas(
   ctx: CanvasRenderingContext2D,
-  img: HTMLImageElement,
+  source: any, // HTMLImageElement | HTMLVideoElement | CanvasImageSource
   scene: any,
   canvasWidth: number,
   canvasHeight: number
@@ -372,8 +395,36 @@ function renderSceneToCanvas(
   const y = transform.y ?? 0;
   const scale = transform.scale ?? 1;
   
-  // Calculate image dimensions to fit canvas while maintaining aspect ratio
-  const imgAspect = img.width / img.height;
+  // Determine intrinsic media dimensions
+  const naturalWidth = (typeof source.videoWidth === 'number' && source.videoWidth > 0)
+    ? source.videoWidth
+    : (typeof source.naturalWidth === 'number' && source.naturalWidth > 0)
+      ? source.naturalWidth
+      : (typeof source.width === 'number' && source.width > 0)
+        ? source.width
+        : 0;
+  const naturalHeight = (typeof source.videoHeight === 'number' && source.videoHeight > 0)
+    ? source.videoHeight
+    : (typeof source.naturalHeight === 'number' && source.naturalHeight > 0)
+      ? source.naturalHeight
+      : (typeof source.height === 'number' && source.height > 0)
+        ? source.height
+        : 0;
+
+  if (!naturalWidth || !naturalHeight) {
+    console.warn('🎬 renderSceneToCanvas: missing media dimensions, skipping draw', {
+      sceneId: scene?.id,
+      naturalWidth,
+      naturalHeight,
+      haveVideoDims: { videoWidth: source?.videoWidth, videoHeight: source?.videoHeight },
+      haveImageDims: { naturalWidth: source?.naturalWidth, naturalHeight: source?.naturalHeight },
+    });
+    ctx.restore();
+    return;
+  }
+
+  // Calculate dimensions to fit canvas while maintaining aspect ratio
+  const imgAspect = naturalWidth / naturalHeight;
   const canvasAspect = canvasWidth / canvasHeight;
   
   let drawWidth = canvasWidth;
@@ -400,7 +451,7 @@ function renderSceneToCanvas(
   
   // Draw image centered at origin
   ctx.drawImage(
-    img,
+    source,
     -drawWidth / 2,
     -drawHeight / 2,
     drawWidth,

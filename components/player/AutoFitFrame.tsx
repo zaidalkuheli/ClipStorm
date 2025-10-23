@@ -70,6 +70,7 @@ export function AutoFitFrame({ aspect, showGrid, showSafeArea, children }: Props
   const togglePlayback = useEditorStore(s => s.togglePlayback);
   const nudgePlayhead = useEditorStore(s => s.nudgePlayhead);
   const scenes = useEditorStore(s => s.scenes);
+  const selectedSceneId = useEditorStore(s => s.selectedSceneId);
   const updateSceneTransform = useEditorStore(s => s.updateSceneTransform);
   
   const getAssetById = useAssetsStore(s => s.getById);
@@ -82,10 +83,21 @@ export function AutoFitFrame({ aspect, showGrid, showSafeArea, children }: Props
   // Memoized current scene and asset calculation
   const current = useMemo(() => {
     if (!scenes.length) return null;
+    
+    // Priority 1: If a scene is selected, show that scene's media
+    if (selectedSceneId) {
+      const selectedScene = scenes.find(sc => sc.id === selectedSceneId);
+      if (selectedScene && selectedScene.assetId) {
+        const asset = getAssetById(selectedScene.assetId);
+        return { scene: selectedScene, asset: asset ?? null };
+      }
+    }
+    
+    // Priority 2: Show scene at current playhead position
     const scene = scenes.find(sc => playheadMs >= sc.startMs && playheadMs < sc.endMs) ?? null;
     if (!scene || !scene.assetId) return scene ? { scene, asset: null } : null;
     return { scene, asset: getAssetById(scene.assetId) ?? null };
-  }, [scenes, playheadMs, getAssetById]);
+  }, [scenes, playheadMs, selectedSceneId, getAssetById]);
 
   // Change media key on scene/asset change to force mount/unmount
   useEffect(() => {
@@ -98,26 +110,29 @@ export function AutoFitFrame({ aspect, showGrid, showSafeArea, children }: Props
     const el = videoRef.current;
     if (!el || !current?.scene || !current?.asset || current.asset.type !== "video") return;
     
-    console.log('🎬 Video sync:', {
-      playheadMs,
-      sceneStartMs: current.scene.startMs,
-      localMs: playheadMs - current.scene.startMs,
-      isPlaying,
-      videoPaused: el.paused,
-      videoCurrentTime: el.currentTime,
-      videoMuted: el.muted
-    });
     
     // Apply scene mute state
     el.muted = current.scene.muted ?? false;
     
+    // If this is a selected scene (not at playhead), show it at its start time
+    if (selectedSceneId && selectedSceneId === current.scene.id) {
+      const videoOffsetMs = current.scene.videoOffsetMs || 0;
+      const t = Math.max(0, videoOffsetMs / 1000);
+      // Only seek if there's a significant difference to avoid thrashing
+      if (Math.abs((el.currentTime ?? 0) - t) > 0.04) el.currentTime = t;
+      // Don't auto-play selected scenes - just display them
+      if (!el.paused) el.pause();
+    } else {
+      // Normal playhead sync for scenes at current playhead position
     const localMs = playheadMs - current.scene.startMs;
-    const t = Math.max(0, localMs / 1000);
+      const videoOffsetMs = current.scene.videoOffsetMs || 0;
+      const t = Math.max(0, (localMs + videoOffsetMs) / 1000);
     // avoid thrashing: only seek if drift > 40ms
     if (Math.abs((el.currentTime ?? 0) - t) > 0.04) el.currentTime = t;
     if (isPlaying && el.paused) el.play().catch(() => {});
     if (!isPlaying && !el.paused) el.pause();
-  }, [playheadMs, isPlaying, current?.scene, current?.asset]);
+    }
+  }, [playheadMs, isPlaying, current?.scene, current?.asset, selectedSceneId]);
 
   // Load transform from scene or reset to default
   useEffect(() => {
@@ -448,13 +463,13 @@ export function AutoFitFrame({ aspect, showGrid, showSafeArea, children }: Props
                           </div>
                         </div>
                       ) : (
-                        <img
-                          key={mediaKey}
-                          src={current.asset.url}
-                          alt={current.asset.name}
-                          className="w-full h-full object-contain"
-                          draggable={false}
-                        />
+                      <img
+                        key={mediaKey}
+                        src={current.asset.url}
+                        alt={current.asset.name}
+                        className="w-full h-full object-contain"
+                        draggable={false}
+                      />
                       )
                     ) : current.asset.type === "video" ? (
                       current.asset.url.startsWith('missing:') ? (
@@ -466,30 +481,21 @@ export function AutoFitFrame({ aspect, showGrid, showSafeArea, children }: Props
                           </div>
                         </div>
                       ) : (
-                        <video
-                          key={mediaKey}
-                          ref={videoRef}
-                          src={current.asset.url}
-                          className="w-full h-full object-contain"
-                          muted={false}
-                          playsInline
-                          preload="metadata"
-                          controls={false}
-                          onLoadedMetadata={() => {
-                            console.log('🎬 Video metadata loaded in player:', {
-                              duration: videoRef.current?.duration,
-                              width: videoRef.current?.videoWidth,
-                              height: videoRef.current?.videoHeight,
-                              src: videoRef.current?.src
-                            });
-                          }}
-                          onCanPlay={() => {
-                            console.log('🎬 Video can play in player');
-                          }}
-                          onError={(e) => {
-                            console.error('❌ Video error in player:', e);
-                          }}
-                        />
+                      <video
+                        key={mediaKey}
+                        ref={videoRef}
+                        src={current.asset.url}
+                        className="w-full h-full object-contain"
+                        muted={false}
+                        playsInline
+                        preload="metadata"
+                        controls={false}
+                          onLoadedMetadata={() => {}}
+                          onCanPlay={() => {}}
+                        onError={(e) => {
+                          console.error('❌ Video error in player:', e);
+                        }}
+                      />
                       )
                     ) : (
                       <div className="flex h-full items-center justify-center text-white/40 text-sm">

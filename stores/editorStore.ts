@@ -120,6 +120,8 @@ export type Scene = {
   muted?: boolean; // Mute state
   // Video duration constraint
   originalDurationMs?: number; // Store the original video file duration
+  // Video trim offset (like audioOffsetMs but for video)
+  videoOffsetMs?: number;
 };
 
 export type AudioClip = {

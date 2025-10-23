@@ -81,7 +81,7 @@ export function useAudioPlayback() {
         scene.trackId && soloedTrackIds.includes(scene.trackId)
       );
       
-      console.log('🎵 Solo mode active:', { 
+      console.log('Solo mode active:', { 
         soloedTracks: soloedTracks.map(t => t.name), 
         playingClips: filteredClips.length,
         playingScenes: filteredScenes.length 
@@ -106,7 +106,7 @@ export function useAudioPlayback() {
     
     const mutedTracks = tracks.filter(track => track.muted);
     if (mutedTracks.length > 0) {
-      console.log('🔇 Muted tracks:', mutedTracks.map(t => t.name), 'Playing clips:', filteredClips.length, 'Playing scenes:', filteredScenes.length);
+      console.log('Muted tracks:', mutedTracks.map(t => t.name), 'Playing clips:', filteredClips.length, 'Playing scenes:', filteredScenes.length);
     }
     
     return { clips: filteredClips, scenes: filteredScenes };
@@ -172,7 +172,7 @@ export function useAudioPlayback() {
       const audioTimeMs = audioOffsetMs + localTimeMs;
       const audioTimeSeconds = audioTimeMs / 1000;
 
-      console.log('🎵 AUDIO PLAYBACK DEBUG:', {
+      console.log('AUDIO PLAYBACK DEBUG:', {
         clipId: clip.id,
         playheadMs,
         clipStartMs: clip.startMs,
@@ -197,20 +197,20 @@ export function useAudioPlayback() {
       // Apply fade in curve
       if (clip.fadeInMs && clip.fadeInMs > 0 && localTimeMs < clip.fadeInMs) {
         fadeMultiplier *= localTimeMs / clip.fadeInMs; // Linear fade in
-        console.log('🎵 Fade In:', { localTimeMs, fadeInMs: clip.fadeInMs, fadeMultiplier });
+        console.log('Fade In:', { localTimeMs, fadeInMs: clip.fadeInMs, fadeMultiplier });
       }
       
       // Apply fade out curve
       if (clip.fadeOutMs && clip.fadeOutMs > 0 && localTimeMs > (clipDurationMs - clip.fadeOutMs)) {
         const fadeOutProgress = (clipDurationMs - localTimeMs) / clip.fadeOutMs;
         fadeMultiplier *= fadeOutProgress; // Linear fade out
-        console.log('🎵 Fade Out:', { localTimeMs, fadeOutMs: clip.fadeOutMs, fadeOutProgress, fadeMultiplier });
+        console.log('Fade Out:', { localTimeMs, fadeOutMs: clip.fadeOutMs, fadeOutProgress, fadeMultiplier });
       }
       
       const finalVolume = baseVolume * fadeMultiplier;
       if (audio.volume !== finalVolume) {
         audio.volume = finalVolume;
-        console.log('🎵 Volume Update:', { baseVolume, fadeMultiplier, finalVolume });
+        console.log('Volume Update:', { baseVolume, fadeMultiplier, finalVolume });
       }
 
       // Set audio time and play if timeline is playing
@@ -226,9 +226,9 @@ export function useAudioPlayback() {
         Math.abs(currentState.lastPlayheadMs - playheadMs) > 100; // Only update if playhead moved significantly
 
       if (needsStateChange) {
-        if (isPlaying && audio.paused) {
+      if (isPlaying && audio.paused) {
           safePlayAudio(audio, clip.id);
-        } else if (!isPlaying && !audio.paused) {
+      } else if (!isPlaying && !audio.paused) {
           safePauseAudio(audio, clip.id);
         }
         
@@ -268,7 +268,7 @@ export function useAudioPlayback() {
         if (needsStateChange) {
           if (isPlaying && audio.paused) {
             safePlayAudio(audio, scene.id);
-          } else if (!isPlaying && !audio.paused) {
+        } else if (!isPlaying && !audio.paused) {
             safePauseAudio(audio, scene.id);
           }
           

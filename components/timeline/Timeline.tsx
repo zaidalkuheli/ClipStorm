@@ -270,7 +270,7 @@ export function Timeline() {
       // update store after scrollLeft adjust
       if (zoomFactor > 1) zoomIn(); else zoomOut();
       
-      console.log('🔍 Timeline zoom:', { 
+      console.log('Timeline zoom:', { 
         from: prevPxPerSec, 
         to: newPxPerSec, 
         factor: zoomFactor,
@@ -287,7 +287,7 @@ export function Timeline() {
         // Don't interfere with scene block dragging
         const target = e.target as HTMLElement;
         if (target.closest('.timeline-scene')) {
-          console.log('🎬 Ignoring timeline click - scene block interaction');
+          console.log('Ignoring timeline click - scene block interaction');
           return;
         }
         
@@ -299,7 +299,7 @@ export function Timeline() {
         const rect = sc.getBoundingClientRect();
         const x = e.clientX - rect.left + sc.scrollLeft;
         const ms = Math.max(0, (x / pxPerSec) * 1000); // Ensure never goes below 0
-        console.log('🎬 Setting playhead to:', ms);
+        console.log('Setting playhead to:', ms);
         setPlayhead(ms);
       };
 
@@ -321,7 +321,7 @@ export function Timeline() {
       if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
         if (selectedSceneId) {
-          console.log('🗑️ Deleting selected scene:', selectedSceneId);
+          console.log('Deleting selected scene:', selectedSceneId);
           removeScene(selectedSceneId);
           selectScene(null); // Clear selection after deletion
         }

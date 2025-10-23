@@ -18,7 +18,7 @@ export function WaveformCanvas({ clip, pxPerSec, height = 40, bgColor }: Wavefor
   const asset = getAssetById(clip.assetId);
   const waveform = asset ? waveforms[asset.id] : undefined;
 
-  console.log('🎵 WAVEFORM CANVAS RENDER:', {
+  console.log('WAVEFORM CANVAS RENDER:', {
     clipId: clip.id,
     assetId: clip.assetId,
     hasAsset: !!asset,
@@ -35,7 +35,7 @@ export function WaveformCanvas({ clip, pxPerSec, height = 40, bgColor }: Wavefor
   });
 
   useEffect(() => {
-    console.log('🎵 WAVEFORM CANVAS useEffect TRIGGERED:', {
+  console.log('WAVEFORM CANVAS useEffect TRIGGERED:', {
       clipId: clip.id,
       audioOffsetMs: clip.audioOffsetMs || 0,
       clipStartMs: clip.startMs,
@@ -47,7 +47,7 @@ export function WaveformCanvas({ clip, pxPerSec, height = 40, bgColor }: Wavefor
     
     const canvas = canvasRef.current;
     if (!canvas || !waveform) {
-      console.log('🎵 Canvas effect skipped:', { hasCanvas: !!canvas, hasWaveform: !!waveform });
+      console.log('Canvas effect skipped:', { hasCanvas: !!canvas, hasWaveform: !!waveform });
       return;
     }
 
@@ -60,7 +60,7 @@ export function WaveformCanvas({ clip, pxPerSec, height = 40, bgColor }: Wavefor
     const limitedWidth = Math.min(rect.width, MAX_CANVAS_WIDTH);
     const limitedHeight = Math.min(rect.height, MAX_CANVAS_HEIGHT);
     
-    console.log('🎵 Starting waveform render:', {
+    console.log('Starting waveform render:', {
       clipId: clip.id,
       canvasSize: { width: canvas.clientWidth, height: canvas.clientHeight },
       canvasRect: { width: rect.width, height: rect.height },
@@ -74,7 +74,7 @@ export function WaveformCanvas({ clip, pxPerSec, height = 40, bgColor }: Wavefor
 
     const ctx = canvas.getContext('2d');
     if (!ctx) {
-      console.log('🎵 No canvas context');
+      console.log('No canvas context');
       return;
     }
     canvas.width = limitedWidth * window.devicePixelRatio;
@@ -86,9 +86,9 @@ export function WaveformCanvas({ clip, pxPerSec, height = 40, bgColor }: Wavefor
     if (bgColor) {
       ctx.fillStyle = bgColor;
       ctx.fillRect(0, 0, limitedWidth, limitedHeight);
-      console.log('🎵 BACKGROUND PAINTED:', { clipId: clip.id, bgColor, width: limitedWidth, height: limitedHeight });
+      console.log('BACKGROUND PAINTED:', { clipId: clip.id, bgColor, width: limitedWidth, height: limitedHeight });
     } else {
-      console.log('🎵 NO BACKGROUND COLOR PROVIDED:', { clipId: clip.id });
+      console.log('NO BACKGROUND COLOR PROVIDED:', { clipId: clip.id });
     }
 
     // Calculate which portion of the waveform to show based on audio offset
@@ -105,7 +105,7 @@ export function WaveformCanvas({ clip, pxPerSec, height = 40, bgColor }: Wavefor
     const actualEndBin = Math.min(waveform.mins.length, endBin);
     const visibleBins = actualEndBin - actualStartBin;
     
-    console.log('🎵 WAVEFORM OFFSET CALCULATION:', {
+    console.log('WAVEFORM OFFSET CALCULATION:', {
       clipId: clip.id,
       audioOffsetMs: audioOffsetMs,
       clipDurationMs: clipDurationMs,
@@ -123,7 +123,7 @@ export function WaveformCanvas({ clip, pxPerSec, height = 40, bgColor }: Wavefor
     
     // Safety check: if no visible bins or invalid range, show full waveform as fallback
     if (visibleBins <= 0 || actualStartBin >= waveform.mins.length || actualEndBin <= actualStartBin) {
-      console.log('🎵 SAFETY FALLBACK - Invalid bin range, showing full waveform');
+      console.log('SAFETY FALLBACK - Invalid bin range, showing full waveform');
       const fallbackVisibleBins = waveform.mins.length;
       
       // Draw the entire waveform as fallback
@@ -141,7 +141,7 @@ export function WaveformCanvas({ clip, pxPerSec, height = 40, bgColor }: Wavefor
         ctx.lineTo(x, bottomY);
         ctx.stroke();
       }
-      console.log('🎵 Fallback waveform drawing complete');
+      console.log('Fallback waveform drawing complete');
       return;
     }
 
@@ -159,7 +159,7 @@ export function WaveformCanvas({ clip, pxPerSec, height = 40, bgColor }: Wavefor
       
       // Safety check for bin index
       if (binIndex >= waveform.mins.length) {
-        console.log('🎵 Bin index out of range:', { binIndex, totalBins: waveform.mins.length });
+        console.log('Bin index out of range:', { binIndex, totalBins: waveform.mins.length });
         break;
       }
       
@@ -178,7 +178,7 @@ export function WaveformCanvas({ clip, pxPerSec, height = 40, bgColor }: Wavefor
       ctx.stroke();
     }
     
-    console.log('🎵 Waveform segment drawing complete:', { 
+    console.log('Waveform segment drawing complete:', { 
       clipId: clip.id, 
       visibleBins, 
       canvasWidth: limitedWidth, 
@@ -190,7 +190,7 @@ export function WaveformCanvas({ clip, pxPerSec, height = 40, bgColor }: Wavefor
 
   // Debug dependency changes
   useEffect(() => {
-    console.log('🎵 DEPENDENCY CHANGE DETECTED:', {
+    console.log('DEPENDENCY CHANGE DETECTED:', {
       clipId: clip.id,
       audioOffsetMs: clip.audioOffsetMs || 0,
       clipStartMs: clip.startMs,

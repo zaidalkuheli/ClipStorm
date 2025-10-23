@@ -7,7 +7,6 @@ import { fileStorage } from "@/lib/fileStorage";
 
 // Generate video thumbnail from video file
 async function generateVideoThumbnail(file: File): Promise<string> {
-  console.log('🎬 Starting video thumbnail generation for:', file.name);
   return new Promise((resolve, reject) => {
     const video = document.createElement('video');
     const canvas = document.createElement('canvas');
@@ -20,30 +19,21 @@ async function generateVideoThumbnail(file: File): Promise<string> {
     }
     
     video.addEventListener('loadedmetadata', () => {
-      console.log('🎬 Video metadata loaded:', {
-        duration: video.duration,
-        width: video.videoWidth,
-        height: video.videoHeight
-      });
-      
       // Set canvas size to video dimensions
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       
       // Seek to 1 second or 10% of duration, whichever is smaller
       const seekTime = Math.min(1, video.duration * 0.1);
-      console.log('🎬 Seeking to:', seekTime);
       video.currentTime = seekTime;
     });
     
     video.addEventListener('seeked', () => {
-      console.log('🎬 Video seeked, drawing frame');
       // Draw the video frame to canvas
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       
       // Convert canvas to data URL
       const thumbnail = canvas.toDataURL('image/jpeg', 0.8);
-      console.log('✅ Video thumbnail generated, size:', thumbnail.length);
       resolve(thumbnail);
     });
     
@@ -73,6 +63,7 @@ interface MediaAsset {
 interface AssetsState {
   assets: MediaAsset[];
   waveforms: Record<string, WaveformData | undefined>;
+  selectedAssetId: string | null;
   
   // Actions
   addAsset: (asset: MediaAsset) => void;
@@ -85,22 +76,19 @@ interface AssetsState {
   analyzeAsset: (assetId: string) => Promise<void>;
   analyzeAllAudioAssets: () => Promise<void>;
   generateMissingThumbnails: () => Promise<void>;
+  selectAsset: (id: string | null) => void;
 }
 
 export const useAssetsStore = create<AssetsState>((set, get) => ({
   assets: [],
   waveforms: {},
+  selectedAssetId: null,
 
   addAsset: async (asset: MediaAsset) => {
-    console.log("🔍 AssetsStore - Adding asset:", asset);
-    console.log("🔍 AssetsStore - Current assets before add:", get().assets.length);
-    
     // Store file in IndexedDB if it exists
     if (asset.file) {
       try {
-        console.log("💾 Storing file in IndexedDB:", asset.name);
         await fileStorage.storeFile(asset.id, asset.file);
-        console.log("✅ File stored successfully:", asset.name);
       } catch (error) {
         console.error("❌ Failed to store file:", error);
         throw error;
@@ -110,9 +98,6 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
     set(state => ({
       assets: [...state.assets, asset]
     }));
-    
-    console.log("🔍 AssetsStore - Assets after add:", get().assets.length);
-    console.log("🔍 AssetsStore - All assets:", get().assets);
     
     // Mark project as dirty when assets are added
     useProjectStore.getState().markDirty();
@@ -131,10 +116,25 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
             set(state => ({
               assets: state.assets.map(a => a.id === asset.id ? { ...a, durationMs } : a)
             }));
-            console.log('🎬 Stored video duration metadata:', { name: asset.name, durationMs });
           }
         } catch (e) {
           console.warn('🎬 Failed to read video duration on addAsset:', asset.name, e);
+        }
+      })();
+    }
+
+    // For audio: attempt to read duration metadata (non-blocking)
+    if (asset.type === 'audio' && asset.file) {
+      (async () => {
+        try {
+          const durationMs = await getAudioDurationFromFile(asset.file!);
+          if (isFinite(durationMs) && durationMs > 0) {
+            set(state => ({
+              assets: state.assets.map(a => a.id === asset.id ? { ...a, durationMs } : a)
+            }));
+          }
+        } catch (e) {
+          console.warn('🎵 Failed to read audio duration on addAsset:', asset.name, e);
         }
       })();
     }
@@ -144,13 +144,13 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
     // Remove file from IndexedDB
     try {
       await fileStorage.deleteFile(id);
-      console.log("🗑️ File removed from IndexedDB:", id);
     } catch (error) {
       console.error("❌ Failed to remove file from IndexedDB:", error);
     }
     
     set(state => ({
-      assets: state.assets.filter(asset => asset.id !== id)
+      assets: state.assets.filter(asset => asset.id !== id),
+      selectedAssetId: state.selectedAssetId === id ? null : state.selectedAssetId
     }));
     
     // Remove any scenes that reference this asset
@@ -172,12 +172,9 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
   },
 
   clearAssets: async () => {
-    console.log("🔍 AssetsStore - Clearing assets (current count:", get().assets.length, ")");
-    
     // Clear all files from IndexedDB
     try {
       await fileStorage.clearAllFiles();
-      console.log("🗑️ All files cleared from IndexedDB");
     } catch (error) {
       console.error("❌ Failed to clear files from IndexedDB:", error);
     }
@@ -187,23 +184,15 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
   },
 
   loadAssetsFromProject: async (projectAssets: any[]) => {
-    console.log("🔍 AssetsStore - Loading assets from project:", projectAssets.length);
-    console.log("🔍 AssetsStore - Project assets data:", projectAssets);
-    
     const loadedAssets: MediaAsset[] = [];
     
     for (const projectAsset of projectAssets) {
-      console.log(`🔍 Loading asset from project: ${projectAsset.name}`, projectAsset);
-      
       // Try to load the file from IndexedDB first
       let file: File | null = null;
       let isFileMissing = false;
       try {
         file = await fileStorage.getFile(projectAsset.id);
-        if (file) {
-          console.log(`✅ Loaded file from IndexedDB: ${projectAsset.name}`);
-        } else {
-          console.log(`⚠️ File not found in IndexedDB: ${projectAsset.name}`);
+        if (!file) {
           isFileMissing = true;
         }
       } catch (error) {
@@ -213,7 +202,6 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
       
       // If no file in IndexedDB, check if we have base64 data to migrate
       if (!file && projectAsset.uri && projectAsset.uri.startsWith('data:')) {
-        console.log(`🔄 Migrating base64 data to IndexedDB: ${projectAsset.name}`);
         try {
           // Convert base64 data URL back to File
           const response = await fetch(projectAsset.uri);
@@ -228,7 +216,6 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
           
           // Store the migrated file in IndexedDB
           await fileStorage.storeFile(projectAsset.id, file);
-          console.log(`✅ Migrated and stored file in IndexedDB: ${projectAsset.name}`);
         } catch (error) {
           console.error(`❌ Failed to migrate base64 data: ${projectAsset.name}`, error);
         }
@@ -238,15 +225,12 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
       let url = '';
       if (file) {
         url = URL.createObjectURL(file);
-        console.log(`✅ Created new ObjectURL for ${projectAsset.name}: ${url}`);
       } else if (isFileMissing) {
         // Use a placeholder URL for missing files
         url = `missing:${projectAsset.id}`;
-        console.warn(`⚠️ File missing for ${projectAsset.name}, using placeholder`);
       } else if (projectAsset.uri) {
         // Fallback to old URI if file is not available
         url = projectAsset.uri;
-        console.log(`🔄 Using fallback URI for ${projectAsset.name}: ${url}`);
       }
       
       const asset: MediaAsset = {
@@ -263,17 +247,8 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
       };
       
       loadedAssets.push(asset);
-      console.log(`🔍 Asset loaded: ${asset.name}`, {
-        id: asset.id,
-        name: asset.name,
-        type: asset.type,
-        url: asset.url,
-        hasFile: !!asset.file,
-        isMissing: asset.isMissing
-      });
     }
     
-    console.log("🔍 AssetsStore - Loaded assets:", loadedAssets);
     set({ assets: loadedAssets });
     
     // Analyze audio assets for waveforms
@@ -297,10 +272,21 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
               set(state => ({
                 assets: state.assets.map(x => x.id === a.id ? { ...x, durationMs } : x)
               }));
-              console.log('🎬 Populated video duration from file:', { name: a.name, durationMs });
             }
           } catch (e) {
             console.warn('🎬 Failed to populate video duration:', a.name, e);
+          }
+        }
+        if (a.type === 'audio' && a.file && (a.durationMs === undefined || a.durationMs <= 0)) {
+          try {
+            const durationMs = await getAudioDurationFromFile(a.file);
+            if (isFinite(durationMs) && durationMs > 0) {
+              set(state => ({
+                assets: state.assets.map(x => x.id === a.id ? { ...x, durationMs } : x)
+              }));
+            }
+          } catch (e) {
+            console.warn('🎵 Failed to populate audio duration:', a.name, e);
           }
         }
       }
@@ -309,21 +295,12 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
 
   getAssetsForProject: async () => {
     const { assets } = get();
-    console.log("🔍 AssetsStore - Converting assets for project:", assets.length);
-    console.log("🔍 AssetsStore - Raw assets:", assets);
     
     const projectAssets = assets.map((asset) => {
-      console.log(`🔍 Processing asset ${asset.name}:`, {
-        hasFile: !!asset.file,
-        currentUrl: asset.url,
-        type: asset.type
-      });
-      
       // Only save file references, not the actual file data
       // Ensure we don't save base64 data URLs
       let uri = asset.url;
       if (uri && uri.startsWith('data:')) {
-        console.warn(`⚠️ Preventing base64 save for ${asset.name}, using placeholder`);
         uri = `blob:placeholder-${asset.id}`; // Placeholder for migrated files
       }
       
@@ -335,17 +312,26 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
         uri: uri
       };
       
-      console.log(`🔍 Asset result for ${asset.name}:`, result);
       return result;
     });
     
-    console.log("🔍 AssetsStore - Project assets:", projectAssets);
     return projectAssets;
   },
 
   getById: (id: string) => {
     const { assets } = get();
     return assets.find(asset => asset.id === id);
+  },
+
+  selectAsset: (id: string | null) => {
+    set({ selectedAssetId: id });
+    // Clear editor selections when selecting an asset to focus inspector on asset
+    if (id) {
+      try {
+        useEditorStore.getState().selectScene(null);
+        useEditorStore.getState().selectAudio(null);
+      } catch {}
+    }
   },
 
   setWaveform: (assetId: string, data: WaveformData) => {
@@ -361,30 +347,17 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
     const { assets, waveforms } = get();
     const asset = assets.find(a => a.id === assetId);
     
-    console.log('🎵 analyzeAsset called for:', assetId, {
-      asset: asset ? { name: asset.name, type: asset.type, hasFile: !!asset.file, hasUrl: !!asset.url } : null,
-      hasWaveform: !!waveforms[assetId]
-    });
-    
     // Skip if not audio or already analyzed
     if (!asset || asset.type !== 'audio' || waveforms[assetId]) {
-      console.log('🎵 Skipping analysis:', { 
-        hasAsset: !!asset, 
-        isAudio: asset?.type === 'audio', 
-        hasWaveform: !!waveforms[assetId] 
-      });
       return;
     }
 
     // Need either file or URL to analyze
     if (!asset.file && !asset.url) {
-      console.log('🎵 No file or URL available for analysis');
       return;
     }
 
     try {
-      console.log('🎵 Starting waveform analysis for:', asset.name);
-      
       let waveformData;
       if (asset.file) {
         // Use file if available (fresh import)
@@ -392,10 +365,8 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
       } else {
         // Use URL if no file (loaded from project)
         if (asset.url.startsWith('missing:')) {
-          console.warn('⚠️ Skipping waveform analysis for missing file:', asset.name);
           return;
         }
-        console.log('🎵 Fetching audio from URL for analysis');
         const response = await fetch(asset.url);
         const arrayBuffer = await response.arrayBuffer();
         const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
@@ -403,12 +374,6 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
         waveformData = await computeWaveform(file);
       }
       
-      console.log('🎵 Waveform analysis complete:', {
-        name: asset.name,
-        bins: waveformData.mins.length,
-        durationMs: waveformData.durationMs,
-        sampleRate: waveformData.sampleRate
-      });
       get().setWaveform(assetId, waveformData);
     } catch (error) {
       console.error('❌ Failed to analyze waveform for:', asset.name, error);
@@ -418,8 +383,6 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
   analyzeAllAudioAssets: async () => {
     const { assets } = get();
     const audioAssets = assets.filter(asset => asset.type === 'audio');
-    
-    console.log('🎵 Analyzing all audio assets:', audioAssets.length);
     
     for (const asset of audioAssets) {
       await get().analyzeAsset(asset.id);
@@ -434,11 +397,8 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
       asset.file
     );
     
-    console.log('🎬 Found video assets without thumbnails:', videoAssets.length);
-    
     for (const asset of videoAssets) {
       try {
-        console.log('🎬 Generating thumbnail for existing video:', asset.name);
         const thumbnail = await generateVideoThumbnail(asset.file!);
         
         set(state => ({
@@ -446,8 +406,6 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
             a.id === asset.id ? { ...a, thumbnail } : a
           )
         }));
-        
-        console.log('✅ Thumbnail generated for:', asset.name);
       } catch (error) {
         console.warn('❌ Failed to generate thumbnail for:', asset.name, error);
       }
@@ -469,6 +427,26 @@ async function getVideoDurationFromFile(file: File): Promise<number> {
       v.onerror = (e) => { cleanup(); reject(e); };
       v.src = url;
       v.load();
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+// Helper: get audio duration from a File via metadata
+async function getAudioDurationFromFile(file: File): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    try {
+      const url = URL.createObjectURL(file);
+      const audio = document.createElement('audio');
+      const cleanup = () => URL.revokeObjectURL(url);
+      audio.preload = 'metadata';
+      audio.onloadedmetadata = () => {
+        try { resolve(Math.round(audio.duration * 1000)); } finally { cleanup(); }
+      };
+      audio.onerror = (e) => { cleanup(); reject(e); };
+      audio.src = url;
+      audio.load();
     } catch (e) {
       reject(e);
     }

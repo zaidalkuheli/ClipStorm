@@ -21,12 +21,22 @@ export function InspectorPanel() {
   const audioClips = useEditorStore(s => s.audioClips);
   const selectedAudioId = useEditorStore(s => s.selectedAudioId);
   const getAssetById = useAssetsStore(s => s.getById);
+  const selectedAssetId = useAssetsStore(s => s.selectedAssetId);
 
   const selectedScene = selectedSceneId ? scenes.find(s => s.id === selectedSceneId) : undefined;
   const selectedAudio = selectedAudioId ? audioClips.find(a => a.id === selectedAudioId) : undefined;
+  const selectedAsset = selectedAssetId ? getAssetById(selectedAssetId) : undefined;
 
   // Derive a concise selection summary
   const selection = (() => {
+    if (selectedAsset) {
+      return {
+        kind: "asset" as const,
+        name: selectedAsset.name,
+        meta: selectedAsset.type,
+        duration: selectedAsset.type === 'video' && selectedAsset.durationMs ? selectedAsset.durationMs : 0
+      };
+    }
     if (selectedScene) {
       const asset = selectedScene.assetId ? getAssetById(selectedScene.assetId) : null;
       const durationMs = selectedScene.endMs - selectedScene.startMs;
@@ -71,7 +81,22 @@ export function InspectorPanel() {
       </div>
 
       {/* Minimal content: show controls when audio or video scene selected; otherwise tiny hint */}
-      {selectedAudio ? (
+      {selectedAsset ? (
+        <div className="flex-1 min-h-0 overflow-auto pt-2">
+          <div className="space-y-2 text-[11px] text-[var(--text-primary)]">
+            <Row label="Name" value={selectedAsset.name} />
+            <Row label="Type" value={selectedAsset.type} />
+            {(selectedAsset.type === 'video' || selectedAsset.type === 'audio') && (
+              <Row label="Duration" value={selectedAsset.durationMs ? formatDuration(selectedAsset.durationMs) : '—'} />
+            )}
+            {selectedAsset.file ? (
+              <Row label="Format" value={selectedAsset.file.type || '—'} />
+            ) : selectedAsset.url ? (
+              <Row label="URL" value={selectedAsset.url.startsWith('missing:') ? 'Missing file' : selectedAsset.url.split('?')[0]} />
+            ) : null}
+          </div>
+        </div>
+      ) : selectedAudio ? (
         <div className="flex-1 min-h-0 overflow-auto pt-2">
           <div className="space-y-3">
             {/* Duration Adjuster */}
@@ -305,5 +330,14 @@ export function InspectorPanel() {
         </div>
       )}
     </Panel>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between py-1 px-2 bg-[var(--surface-secondary)]/60 border border-[var(--border-primary)] rounded">
+      <span className="text-[10px] text-[var(--text-secondary)]">{label}</span>
+      <span className="text-[10px] text-[var(--text-primary)] truncate max-w-[160px] ml-2" title={value}>{value}</span>
+    </div>
   );
 }

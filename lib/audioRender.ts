@@ -198,6 +198,79 @@ export async function renderTimelineToWav(opts?: {
 }
 
 /**
+ * Renders the timeline's audio offline and returns an AudioBuffer
+ * This is used by the video export to mux mixed audio
+ */
+export async function renderTimelineAudioBuffer(opts?: {
+  sampleRate?: number;
+}): Promise<AudioBuffer> {
+  const sampleRate = opts?.sampleRate ?? 48000;
+  const channels = 2;
+  const editorState = useEditorStore.getState();
+  const assetsState = useAssetsStore.getState();
+  const { tracks, audioClips, durationMs, fps, scenes } = editorState;
+
+  const durationSec = durationMs / 1000;
+
+  const ctx = new OfflineAudioContext({
+    length: Math.ceil(durationSec * sampleRate),
+    sampleRate,
+    numberOfChannels: channels
+  });
+
+  // Determine track audible states
+  const soloActive = tracks.some(t => t.soloed);
+  const trackAudibleMap = new Map(
+    tracks.map(track => [track.id, !track.muted && (!soloActive || track.soloed)])
+  );
+
+  // Add timeline audio clips
+  for (const clip of audioClips) {
+    try {
+      const trackAudible = trackAudibleMap.get(clip.trackId || '') ?? true;
+      if (!trackAudible) continue;
+      const baseGain = clip.gain ?? 1;
+      if (baseGain <= 0) continue;
+      const asset = assetsState.getById(clip.assetId);
+      if (!asset || !asset.file) continue;
+      const arrayBuffer = await asset.file.arrayBuffer();
+      const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
+      const clipStartSec = (clip.startF ?? 0) / fps;
+      const clipDurationSec = (clip.durF ?? 0) / fps;
+      const fileOffsetSec = Math.max(0, (clip.audioOffsetMs ?? 0) / 1000);
+      const playDurSec = Math.min(audioBuffer.duration - fileOffsetSec, clipDurationSec);
+      if (playDurSec <= 0) continue;
+      const source = ctx.createBufferSource();
+      const gainNode = ctx.createGain();
+      source.buffer = audioBuffer;
+      source.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      const fadeInSec = Math.min((clip.fadeInMs ?? 0) / 1000, Math.max(0, playDurSec - 0.01));
+      const fadeOutSec = Math.min((clip.fadeOutMs ?? 0) / 1000, Math.max(0, playDurSec - 0.01));
+      const startTime = clipStartSec;
+      const targetGain = baseGain;
+      if (fadeInSec > 0) {
+        gainNode.gain.setValueAtTime(0, startTime);
+        gainNode.gain.linearRampToValueAtTime(targetGain, startTime + fadeInSec);
+      } else {
+        gainNode.gain.setValueAtTime(targetGain, startTime);
+      }
+      if (fadeOutSec > 0) {
+        const fadeOutStart = startTime + playDurSec - fadeOutSec;
+        gainNode.gain.setValueAtTime(targetGain, fadeOutStart);
+        gainNode.gain.linearRampToValueAtTime(0, startTime + playDurSec);
+      }
+      source.start(startTime, fileOffsetSec, playDurSec);
+    } catch {}
+  }
+
+  // TODO: add video-audio mixing in later step (ffmpeg.wasm demux) - separate to-do
+
+  const renderedBuffer = await ctx.startRendering();
+  return renderedBuffer;
+}
+
+/**
  * Converts an AudioBuffer to a WAV file blob
  * Creates 16-bit PCM LE stereo WAV format
  */

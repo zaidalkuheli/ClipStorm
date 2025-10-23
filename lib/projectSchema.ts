@@ -64,6 +64,7 @@ const SceneSchema = z.object({
   gain: z.number().min(0).max(1).optional(), // NEW audio control
   muted: z.boolean().optional(), // NEW audio control
   originalDurationMs: z.number().optional(), // NEW video duration constraint
+  videoOffsetMs: z.number().min(0).optional(), // NEW: video start offset for trimmed playback
 });
 
 // Project metadata

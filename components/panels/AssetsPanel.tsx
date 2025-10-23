@@ -82,6 +82,8 @@ export function AssetsPanel() {
   
   // Get assets store functions
   const assets = useAssetsStore(s => s.assets);
+  const selectedAssetId = useAssetsStore(s => s.selectedAssetId);
+  const selectAsset = useAssetsStore(s => s.selectAsset);
   const addAsset = useAssetsStore(s => s.addAsset);
   const removeAsset = useAssetsStore(s => s.removeAsset);
   
@@ -270,8 +272,8 @@ export function AssetsPanel() {
             {/* Assets Grid */}
             <div className="flex-1 overflow-y-auto">
             <div className={`grid gap-2 ${viewMode === 'grid' 
-              ? 'grid-cols-[repeat(auto-fill,minmax(110px,110px))] justify-start'
-              : 'grid-cols-[repeat(auto-fill,minmax(180px,180px))] justify-start'}`}>
+              ? 'grid-cols-2'
+              : 'grid-cols-1'}`}>
                 {filteredAssets.map((asset) => (
                   <div
                     key={asset.id}
@@ -330,11 +332,16 @@ export function AssetsPanel() {
                       }, 0);
                     }}
                     onDoubleClick={() => addToTimeline(asset)}
-                    className={`relative rounded-lg overflow-hidden hover:bg-[var(--surface-tertiary)] transition-colors group ${viewMode === 'grid' ? 'w-[110px]' : 'w-[180px]'} ${
+                    className={`relative rounded-lg overflow-hidden hover:bg-[var(--surface-tertiary)] transition-colors group ${
                       isAssetMissing(asset) 
                         ? 'bg-red-500/20 border-2 border-red-500 cursor-not-allowed' 
-                        : 'bg-[var(--surface-secondary)] cursor-grab active:cursor-grabbing'
+                        : `bg-[var(--surface-secondary)] cursor-grab active:cursor-grabbing ${selectedAssetId === asset.id ? 'ring-2 ring-white/60' : ''}`
                     }`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (isAssetMissing(asset)) return;
+                      selectAsset(asset.id);
+                    }}
                   >
                     {/* Asset Preview */}
                     <div className={`relative aspect-square`}>

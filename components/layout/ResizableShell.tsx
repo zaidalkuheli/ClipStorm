@@ -8,6 +8,7 @@ import { Timeline } from "@/components/timeline/Timeline";
 import { ClientOnly } from "@/components/ui/ClientOnly";
 import { useProjectStore } from "@/stores/projectStore";
 import { useEditorStore } from "@/stores/editorStore";
+import { useAssetsStore } from "@/stores/assetsStore";
 
 /**
  * ResizableShell - Main layout component with persistent panel sizing
@@ -33,14 +34,15 @@ export function ResizableShell() {
 
 function ResizableShellContent() {
   // Use consistent initial values to prevent hydration mismatch
-  const [hLayout, setHLayout] = React.useState<number[]>([15, 70, 15]);
+  const [hLayout, setHLayout] = React.useState<number[]>([35, 50, 15]);
   const [vLayout, setVLayout] = React.useState<number[]>([80, 20]);
   
   // Project store for dirty state protection
   const dirty = useProjectStore(s => s.dirty);
   const selectedSceneId = useEditorStore(s => s.selectedSceneId);
   const selectedAudioId = useEditorStore(s => s.selectedAudioId);
-  const hasSelection = !!(selectedSceneId || selectedAudioId);
+  const selectedAssetId = useAssetsStore(s => s.selectedAssetId);
+  const hasSelection = !!(selectedSceneId || selectedAudioId || selectedAssetId);
   const prevInspectorSizeRef = React.useRef<number>(15);
 
   // Dirty state protection - warn on unload

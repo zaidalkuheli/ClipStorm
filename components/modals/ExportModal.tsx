@@ -42,12 +42,12 @@ export function ExportModal({ isOpen, onClose }: ExportModalProps) {
     cancellationTokenRef.current = new CancellationToken();
     
     try {
-      console.log('🎬 Starting video export...');
+      console.log('Starting video export...');
       const blob = await renderTimelineToWebM({
         onProgress: (progress) => {
           setExportProgress(progress.percent);
           setExportStage(progress.stage);
-          console.log('🎬 Progress:', progress.percent.toFixed(1) + '%', progress.stage);
+          console.log('Progress:', progress.percent.toFixed(1) + '%', progress.stage);
         },
         cancellationToken: cancellationTokenRef.current
       });
@@ -86,7 +86,7 @@ export function ExportModal({ isOpen, onClose }: ExportModalProps) {
   const handleAudioExport = async () => {
     setIsExporting(true);
     try {
-      console.log('🎵 Starting audio export...');
+      console.log('Starting audio export...');
       const blob = await renderTimelineToWav();
       
       // Create download link
