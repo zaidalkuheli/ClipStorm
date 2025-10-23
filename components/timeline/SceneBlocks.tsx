@@ -468,6 +468,35 @@ export function SceneBlocks({ trackId }: { trackId?: string }) {
               title={`${s.label} • ${((s.endMs - s.startMs)/1000).toFixed(2)}s`}
               draggable={false}
               onClick={(e) => onSceneClick(e, s.id)}
+              onDragOver={(e) => {
+                // Check if dragging an asset by looking at dataTransfer types
+                const hasAssetData = e.dataTransfer.types.includes("text/x-clipstorm-asset");
+                if (!hasAssetData) return;
+                
+                // Check drag effect to determine if it's image/video
+                if (e.dataTransfer.effectAllowed === "copy") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  // Visual hint for replace (red highlight)
+                  (e.currentTarget as HTMLElement).style.boxShadow = 'inset 0 0 0 2px rgba(239,68,68,0.95)';
+                }
+              }}
+              onDragLeave={(e) => {
+                (e.currentTarget as HTMLElement).style.boxShadow = '';
+              }}
+              onDrop={(e) => {
+                const data = e.dataTransfer.getData("text/x-clipstorm-asset");
+                if (!data) return;
+                e.preventDefault();
+                e.stopPropagation();
+                (e.currentTarget as HTMLElement).style.boxShadow = '';
+                const { id: assetId, type } = JSON.parse(data);
+                if (type !== 'image' && type !== 'video') return;
+                beginTx('Replace scene media');
+                useEditorStore.getState().replaceSceneAsset(s.id, assetId);
+                commitTx();
+                selectScene(s.id);
+              }}
               onContextMenu={(e) => {
                 e.preventDefault();
                 setContextMenu({

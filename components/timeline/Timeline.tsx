@@ -13,9 +13,16 @@ import { TrackHeader } from "./TrackHeader";
 import { Track } from "./Track";
 
 function formatDuration(ms: number): string {
-  const minutes = Math.floor(ms / 60000);
-  const seconds = Math.floor((ms % 60000) / 1000);
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  } else {
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  }
 }
 
 export function Timeline() {
@@ -28,7 +35,7 @@ export function Timeline() {
   const nudgePlayhead = useEditorStore(s => s.nudgePlayhead);
   const togglePlayback = useEditorStore(s => s.togglePlayback);
   const selectScene = useEditorStore(s => s.selectScene);
-  const addScene = useEditorStore(s => s.addScene);
+  const selectAudio = useEditorStore(s => s.selectAudio);
   const selectedSceneId = useEditorStore(s => s.selectedSceneId);
   const removeScene = useEditorStore(s => s.removeScene);
   const scenes = useEditorStore(s => s.scenes); // Add scenes state
@@ -147,8 +154,11 @@ export function Timeline() {
     const atMs = getMsFromClientX(e.clientX);
     beginTx("Drop asset (video)");
     const dur = type === "video" ? 5000 : 3000;
-    addSceneFromAsset(id, { atMs, durationMs: dur });
+    const newSceneId = addSceneFromAsset(id, { atMs, durationMs: dur });
     commitTx();
+    
+    // Select the newly created scene
+    selectScene(newSceneId);
   }
 
   function handleDropOnAudio(e: React.DragEvent) {
@@ -159,8 +169,11 @@ export function Timeline() {
     if (type !== "audio") return;
     const atMs = getMsFromClientX(e.clientX);
     beginTx("Drop asset (audio)");
-    addAudioFromAsset(id, "music", { atMs, durationMs: 30000 }); // 30s default
+    const newAudioId = addAudioFromAsset(id, "music", { atMs, durationMs: 30000 }); // 30s default
     commitTx();
+    
+    // Select the newly created audio clip
+    selectAudio(newAudioId);
   }
 
   const handleAddTrack = (type: "video" | "audio") => {

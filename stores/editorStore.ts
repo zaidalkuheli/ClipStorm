@@ -193,6 +193,9 @@ interface EditorState {
   setAudioClips: (audioClips: AudioClip[]) => void;
   setDuration: (durationMs: number) => void;
   addScene: (scene: Omit<Scene, 'id'>) => void;
+  // Replace media on existing blocks
+  replaceSceneAsset: (sceneId: string, newAssetId: string) => void;
+  replaceAudioAsset: (audioId: string, newAssetId: string) => void;
   removeScene: (id: string) => void;
   moveScene: (id: string, newStartMs: number, pxPerSec: number) => void;
   resizeScene: (id: string, edge: "left" | "right", deltaMs: number, minMs: number, gridMs: number) => void;
@@ -428,6 +431,35 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       newDurationMs: newDuration 
     });
     set({ audioClips, durationMs: newDuration });
+  },
+
+  // Replace the asset bound to a scene without changing timing/links/track
+  replaceSceneAsset: (sceneId, newAssetId) => {
+    const { scenes } = get();
+    const asset = useAssetsStore.getState().getById(newAssetId);
+    set(state => ({
+      scenes: state.scenes.map(s => s.id === sceneId ? {
+        ...s,
+        assetId: newAssetId,
+        // keep existing label if user renamed; otherwise use asset name
+        label: s.label && s.label.trim().length > 0 ? s.label : (asset?.name || s.label)
+      } : s)
+    }));
+  },
+
+  // Replace the asset bound to an audio clip; keep timing and kind
+  // Update originalDurationMs if we can determine the new file duration
+  replaceAudioAsset: (audioId, newAssetId) => {
+    const waveformData = useAssetsStore.getState().waveforms[newAssetId];
+    const assets = useAssetsStore.getState();
+    const asset = assets.getById(newAssetId);
+    set(state => ({
+      audioClips: state.audioClips.map(a => a.id === audioId ? {
+        ...a,
+        assetId: newAssetId,
+        originalDurationMs: waveformData?.durationMs ?? a.originalDurationMs
+      } : a)
+    }));
   },
 
   setDuration: (durationMs) => set({ durationMs }),

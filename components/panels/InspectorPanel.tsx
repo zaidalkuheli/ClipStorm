@@ -2,6 +2,19 @@ import { Panel } from "@/components/ui/Panel";
 import { useEditorStore } from "@/stores/editorStore";
 import { useAssetsStore } from "@/stores/assetsStore";
 
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  } else {
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  }
+}
+
 export function InspectorPanel() {
   const selectedSceneId = useEditorStore(s => s.selectedSceneId);
   const scenes = useEditorStore(s => s.scenes);
@@ -16,11 +29,23 @@ export function InspectorPanel() {
   const selection = (() => {
     if (selectedScene) {
       const asset = selectedScene.assetId ? getAssetById(selectedScene.assetId) : null;
-      return { kind: "scene" as const, name: asset?.name || selectedScene.label || "Scene", meta: asset?.type || "" };
+      const durationMs = selectedScene.endMs - selectedScene.startMs;
+      return { 
+        kind: "scene" as const, 
+        name: asset?.name || selectedScene.label || "Scene", 
+        meta: asset?.type || "",
+        duration: durationMs
+      };
     }
     if (selectedAudio) {
       const asset = selectedAudio.assetId ? getAssetById(selectedAudio.assetId) : null;
-      return { kind: "audio" as const, name: asset?.name || "Audio Clip", meta: selectedAudio.kind };
+      const durationMs = selectedAudio.endMs - selectedAudio.startMs;
+      return { 
+        kind: "audio" as const, 
+        name: asset?.name || "Audio Clip", 
+        meta: selectedAudio.kind,
+        duration: durationMs
+      };
     }
     return null;
   })();
@@ -34,6 +59,7 @@ export function InspectorPanel() {
             <div>
               <div className="text-xs text-[var(--text-tertiary)] capitalize">{selection.kind}</div>
               <div className="text-sm text-[var(--text-primary)] truncate max-w-[220px]" title={selection.name}>{selection.name}</div>
+              <div className="text-xs text-[var(--text-primary)] font-mono font-semibold">{formatDuration(selection.duration)}</div>
             </div>
             {selection.meta && (
               <span className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-primary)] text-[var(--text-tertiary)]">{selection.meta}</span>
@@ -48,6 +74,42 @@ export function InspectorPanel() {
       {selectedAudio ? (
         <div className="flex-1 min-h-0 overflow-auto pt-2">
           <div className="space-y-3">
+            {/* Duration Adjuster */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-[var(--text-secondary)] font-medium">Duration</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min={0.1}
+                    max={selectedAudio.assetId ? (getAssetById(selectedAudio.assetId)?.originalDurationMs || 3600000) / 1000 : 3600}
+                    step={0.1}
+                    value={Math.round(((selectedAudio.endMs - selectedAudio.startMs) / 1000) * 10) / 10}
+                    onChange={(e) => {
+                      let inputValue = e.target.value;
+                      // Replace comma with period for consistent parsing
+                      inputValue = inputValue.replace(',', '.');
+                      const value = Number(inputValue);
+                      if (value <= 0) return; // Prevent 0 or negative values
+                      
+                      // Get the asset to check original duration
+                      const asset = selectedAudio.assetId ? getAssetById(selectedAudio.assetId) : null;
+                      const maxDurationSeconds = asset?.originalDurationMs ? asset.originalDurationMs / 1000 : Infinity;
+                      
+                      // Clamp to maximum audio length
+                      const seconds = Math.min(Math.round(value * 10) / 10, maxDurationSeconds);
+                      const newDurationMs = seconds * 1000;
+                      const currentStartMs = selectedAudio.startMs;
+                      const newEndMs = currentStartMs + newDurationMs;
+                      useEditorStore.getState().resizeAudioTo(selectedAudio.id, "right", newEndMs, 100, 100, 100);
+                    }}
+                    className="w-16 h-5 text-[10px] text-center bg-[var(--surface-primary)] border border-[var(--border-primary)] rounded px-1 font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  />
+                  <span className="text-[10px] text-[var(--text-tertiary)]">s</span>
+                </div>
+              </div>
+            </div>
+
             {/* Volume */}
             <div>
               <div className="flex items-center justify-between mb-2">
@@ -160,17 +222,43 @@ export function InspectorPanel() {
       ) : selectedScene ? (
         <div className="flex-1 min-h-0 overflow-auto pt-2">
           <div className="space-y-3">
+            {/* Duration Adjuster */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-[var(--text-secondary)] font-medium">Duration</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min={0.1}
+                    max={3600}
+                    step={0.1}
+                    value={Math.round(((selectedScene.endMs - selectedScene.startMs) / 1000) * 10) / 10}
+                    onChange={(e) => {
+                      let inputValue = e.target.value;
+                      // Replace comma with period for consistent parsing
+                      inputValue = inputValue.replace(',', '.');
+                      const value = Number(inputValue);
+                      if (value <= 0) return; // Prevent 0 or negative values
+                      const seconds = Math.round(value * 10) / 10; // Round to 1 decimal place
+                      const newDurationMs = seconds * 1000;
+                      const currentStartMs = selectedScene.startMs;
+                      const newEndMs = currentStartMs + newDurationMs;
+                      useEditorStore.getState().resizeSceneTo(selectedScene.id, "right", newEndMs, 100, 100, 100);
+                    }}
+                    className="w-16 h-5 text-[10px] text-center bg-[var(--surface-primary)] border border-[var(--border-primary)] rounded px-1 font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  />
+                  <span className="text-[10px] text-[var(--text-tertiary)]">s</span>
+                </div>
+              </div>
+            </div>
+
             {/* Show video audio controls only if the scene has a video asset */}
             {(() => {
               const asset = selectedScene.assetId ? getAssetById(selectedScene.assetId) : null;
               const isVideo = asset?.type === 'video';
               
               if (!isVideo) {
-                return (
-                  <div className="text-[10px] text-[var(--text-tertiary)] text-center py-4">
-                    No audio controls for images
-                  </div>
-                );
+                return null;
               }
               
               return (

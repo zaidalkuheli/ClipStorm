@@ -3,9 +3,15 @@ import React from "react";
 import { useEditorStore } from "@/stores/editorStore";
 
 function formatTime(seconds: number): string {
-  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
   const secs = seconds % 60;
-  return `${minutes}:${secs.toString().padStart(2, '0')}`;
+  
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  } else {
+    return `${minutes}:${secs.toString().padStart(2, '0')}`;
+  }
 }
 
 export function Ruler({ contentWidth }: { contentWidth: number }) {

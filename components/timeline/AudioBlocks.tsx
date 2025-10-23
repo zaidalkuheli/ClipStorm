@@ -577,6 +577,34 @@ export function AudioBlocks({ trackId }: { trackId?: string }) {
               title={`${asset?.name || a.kind} • ${((a.endMs - a.startMs)/1000).toFixed(2)}s`}
               draggable={false}
               onClick={(e) => onAudioClick(e, a.id)}
+              onDragOver={(e) => {
+                // Check if dragging an asset by looking at dataTransfer types
+                const hasAssetData = e.dataTransfer.types.includes("text/x-clipstorm-asset");
+                if (!hasAssetData) return;
+                
+                // Check drag effect to determine if it's audio
+                if (e.dataTransfer.effectAllowed === "copy") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  (e.currentTarget as HTMLElement).style.boxShadow = 'inset 0 0 0 2px rgba(239,68,68,0.95)';
+                }
+              }}
+              onDragLeave={(e) => {
+                (e.currentTarget as HTMLElement).style.boxShadow = '';
+              }}
+              onDrop={(e) => {
+                const data = e.dataTransfer.getData("text/x-clipstorm-asset");
+                if (!data) return;
+                e.preventDefault();
+                e.stopPropagation();
+                (e.currentTarget as HTMLElement).style.boxShadow = '';
+                const { id: assetId, type } = JSON.parse(data);
+                if (type !== 'audio') return;
+                beginTx('Replace audio media');
+                useEditorStore.getState().replaceAudioAsset(a.id, assetId);
+                commitTx();
+                selectAudio(a.id);
+              }}
               onDoubleClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();

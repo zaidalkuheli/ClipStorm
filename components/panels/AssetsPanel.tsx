@@ -93,6 +93,8 @@ export function AssetsPanel() {
   const commitTx = useEditorStore(s => s.commitTx);
   const addSceneFromAsset = useEditorStore(s => s.addSceneFromAsset);
   const addAudioFromAsset = useEditorStore(s => s.addAudioFromAsset);
+  const selectScene = useEditorStore(s => s.selectScene);
+  const selectAudio = useEditorStore(s => s.selectAudio);
 
   const handleImportClick = () => {
     fileInputRef.current?.click();
@@ -172,10 +174,12 @@ export function AssetsPanel() {
     beginTx("Add asset to timeline");
     if (asset.type === "image" || asset.type === "video") {
       const dur = asset.type === "video" ? 5000 : 3000;
-      addSceneFromAsset(asset.id, { durationMs: dur, label: asset.name });
+      const newSceneId = addSceneFromAsset(asset.id, { durationMs: dur, label: asset.name });
+      selectScene(newSceneId);
     } else if (asset.type === "audio") {
       // Add audio to audio track with longer default duration
-      addAudioFromAsset(asset.id, "music", { durationMs: 30000 }); // 30s default
+      const newAudioId = addAudioFromAsset(asset.id, "music", { durationMs: 30000 }); // 30s default
+      selectAudio(newAudioId);
     }
     commitTx();
   };
@@ -279,6 +283,51 @@ export function AssetsPanel() {
                       }
                       e.dataTransfer.setData("text/x-clipstorm-asset", JSON.stringify({ id: asset.id, type: asset.type }));
                       e.dataTransfer.effectAllowed = "copy";
+                      
+                      // Create a smaller, more professional drag preview
+                      const dragPreview = document.createElement('div');
+                      dragPreview.style.cssText = `
+                        width: 60px;
+                        height: 60px;
+                        border-radius: 8px;
+                        overflow: hidden;
+                        background: var(--surface-primary);
+                        border: 2px solid var(--accent-cool);
+                        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+                        position: absolute;
+                        top: -1000px;
+                        left: -1000px;
+                        z-index: 9999;
+                      `;
+                      
+                      // Add thumbnail or icon
+                      if ((asset.type === 'image' || asset.type === 'video') && (asset.thumbnail || asset.url)) {
+                        const img = document.createElement('img');
+                        img.src = asset.thumbnail || asset.url;
+                        img.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
+                        dragPreview.appendChild(img);
+                      } else {
+                        const icon = document.createElement('div');
+                        icon.style.cssText = `
+                          width: 100%;
+                          height: 100%;
+                          display: flex;
+                          align-items: center;
+                          justify-content: center;
+                          font-size: 20px;
+                          color: var(--text-primary);
+                        `;
+                        icon.textContent = asset.type === 'audio' ? '🎵' : asset.type === 'video' ? '🎬' : '📁';
+                        dragPreview.appendChild(icon);
+                      }
+                      
+                      document.body.appendChild(dragPreview);
+                      e.dataTransfer.setDragImage(dragPreview, 30, 30);
+                      
+                      // Clean up after drag starts
+                      setTimeout(() => {
+                        document.body.removeChild(dragPreview);
+                      }, 0);
                     }}
                     onDoubleClick={() => addToTimeline(asset)}
                     className={`relative rounded-lg overflow-hidden hover:bg-[var(--surface-tertiary)] transition-colors group ${viewMode === 'grid' ? 'w-[110px]' : 'w-[180px]'} ${
