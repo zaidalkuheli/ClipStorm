@@ -12,6 +12,47 @@ export function useAudioPlayback() {
   const getAssetById = useAssetsStore(s => s.getById);
   
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const playPromisesRef = useRef<Map<string, Promise<void>>>(new Map());
+  const audioStatesRef = useRef<Map<string, { isPlaying: boolean; lastPlayheadMs: number }>>(new Map());
+
+  // Helper function to safely play audio with promise handling
+  const safePlayAudio = async (audio: HTMLAudioElement, elementId: string) => {
+    try {
+      // Cancel any existing play promise
+      const existingPromise = playPromisesRef.current.get(elementId);
+      if (existingPromise) {
+        // Don't await the existing promise, just clear it
+        playPromisesRef.current.delete(elementId);
+      }
+      
+      // Start new play operation
+      const playPromise = audio.play();
+      playPromisesRef.current.set(elementId, playPromise);
+      
+      await playPromise;
+      playPromisesRef.current.delete(elementId);
+    } catch (error) {
+      // Clear the promise reference on error
+      playPromisesRef.current.delete(elementId);
+      
+      // Only log non-abort errors (abort errors are expected when rapidly switching)
+      if (error instanceof Error && !error.name.includes('AbortError')) {
+        console.warn('Failed to play audio:', error);
+      }
+    }
+  };
+
+  // Helper function to safely pause audio
+  const safePauseAudio = (audio: HTMLAudioElement, elementId: string) => {
+    // Cancel any pending play promise
+    const existingPromise = playPromisesRef.current.get(elementId);
+    if (existingPromise) {
+      playPromisesRef.current.delete(elementId);
+    }
+    
+    // Pause the audio
+    audio.pause();
+  };
 
   // Get current audio clips that should be playing
   const getCurrentAudioClips = () => {
@@ -115,7 +156,7 @@ export function useAudioPlayback() {
       const isCurrentScene = currentScenes.find(scene => scene.id === elementId);
       
       if (!isCurrentClip && !isCurrentScene) {
-        audio.pause();
+        safePauseAudio(audio, elementId);
         audio.currentTime = 0;
       }
     });
@@ -177,12 +218,25 @@ export function useAudioPlayback() {
         audio.currentTime = audioTimeSeconds;
       }
 
-      if (isPlaying && audio.paused) {
-        audio.play().catch(error => {
-          console.warn('Failed to play audio:', error);
+      // Check if we need to change the audio state
+      const currentState = audioStatesRef.current.get(clip.id);
+      const shouldBePlaying = isPlaying && !audio.paused;
+      const needsStateChange = !currentState || 
+        currentState.isPlaying !== shouldBePlaying || 
+        Math.abs(currentState.lastPlayheadMs - playheadMs) > 100; // Only update if playhead moved significantly
+
+      if (needsStateChange) {
+        if (isPlaying && audio.paused) {
+          safePlayAudio(audio, clip.id);
+        } else if (!isPlaying && !audio.paused) {
+          safePauseAudio(audio, clip.id);
+        }
+        
+        // Update state tracking
+        audioStatesRef.current.set(clip.id, {
+          isPlaying: shouldBePlaying,
+          lastPlayheadMs: playheadMs
         });
-      } else if (!isPlaying && !audio.paused) {
-        audio.pause();
       }
     });
 
@@ -204,15 +258,30 @@ export function useAudioPlayback() {
       if (audioTimeSeconds >= 0 && audioTimeSeconds < (scene.endMs - scene.startMs) / 1000) {
         audio.currentTime = audioTimeSeconds;
         
-        if (isPlaying && !audio.paused) {
-          // Already playing at correct time
-        } else if (isPlaying && audio.paused) {
-          audio.play().catch(console.error);
-        } else if (!isPlaying && !audio.paused) {
-          audio.pause();
+        // Check if we need to change the audio state
+        const currentState = audioStatesRef.current.get(scene.id);
+        const shouldBePlaying = isPlaying && !audio.paused;
+        const needsStateChange = !currentState || 
+          currentState.isPlaying !== shouldBePlaying || 
+          Math.abs(currentState.lastPlayheadMs - playheadMs) > 100;
+
+        if (needsStateChange) {
+          if (isPlaying && audio.paused) {
+            safePlayAudio(audio, scene.id);
+          } else if (!isPlaying && !audio.paused) {
+            safePauseAudio(audio, scene.id);
+          }
+          
+          // Update state tracking
+          audioStatesRef.current.set(scene.id, {
+            isPlaying: shouldBePlaying,
+            lastPlayheadMs: playheadMs
+          });
         }
       } else if (!isPlaying && !audio.paused) {
-        audio.pause();
+        safePauseAudio(audio, scene.id);
+        // Clear state when pausing
+        audioStatesRef.current.delete(scene.id);
       }
     });
   }, [isPlaying, playheadMs, audioClips, scenes, tracks]);
@@ -224,9 +293,12 @@ export function useAudioPlayback() {
     
     audioElementsRef.current.forEach((audio, elementId) => {
       if (!currentClipIds.has(elementId) && !currentSceneIds.has(elementId)) {
-        audio.pause();
+        safePauseAudio(audio, elementId);
         audio.src = '';
         audioElementsRef.current.delete(elementId);
+        // Clean up any pending play promises and state tracking
+        playPromisesRef.current.delete(elementId);
+        audioStatesRef.current.delete(elementId);
       }
     });
   }, [audioClips, scenes]);
@@ -234,11 +306,13 @@ export function useAudioPlayback() {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      audioElementsRef.current.forEach(audio => {
-        audio.pause();
+      audioElementsRef.current.forEach((audio, elementId) => {
+        safePauseAudio(audio, elementId);
         audio.src = '';
       });
       audioElementsRef.current.clear();
+      playPromisesRef.current.clear();
+      audioStatesRef.current.clear();
     };
   }, []);
 }

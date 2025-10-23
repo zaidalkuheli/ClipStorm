@@ -64,6 +64,7 @@ interface MediaAsset {
   type: 'image' | 'audio' | 'video';
   url: string;
   thumbnail?: string;
+  durationMs?: number; // For videos (and potentially audio if desired later)
   addedAt: Date;
   file?: File; // Store the actual file for saving
   isMissing?: boolean; // Flag for missing files
@@ -119,6 +120,23 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
     // Auto-analyze audio files for waveform data
     if (asset.type === 'audio' && asset.file) {
       get().analyzeAsset(asset.id);
+    }
+
+    // For videos: attempt to read duration metadata (non-blocking)
+    if (asset.type === 'video' && asset.file) {
+      (async () => {
+        try {
+          const durationMs = await getVideoDurationFromFile(asset.file!);
+          if (isFinite(durationMs) && durationMs > 0) {
+            set(state => ({
+              assets: state.assets.map(a => a.id === asset.id ? { ...a, durationMs } : a)
+            }));
+            console.log('🎬 Stored video duration metadata:', { name: asset.name, durationMs });
+          }
+        } catch (e) {
+          console.warn('🎬 Failed to read video duration on addAsset:', asset.name, e);
+        }
+      })();
     }
   },
 
@@ -267,6 +285,26 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
     setTimeout(() => {
       get().generateMissingThumbnails();
     }, 200); // Small delay after audio analysis
+
+    // Populate video durations for any assets with files but missing duration
+    setTimeout(async () => {
+      const { assets } = get();
+      for (const a of assets) {
+        if (a.type === 'video' && a.file && (a.durationMs === undefined || a.durationMs <= 0)) {
+          try {
+            const durationMs = await getVideoDurationFromFile(a.file);
+            if (isFinite(durationMs) && durationMs > 0) {
+              set(state => ({
+                assets: state.assets.map(x => x.id === a.id ? { ...x, durationMs } : x)
+              }));
+              console.log('🎬 Populated video duration from file:', { name: a.name, durationMs });
+            }
+          } catch (e) {
+            console.warn('🎬 Failed to populate video duration:', a.name, e);
+          }
+        }
+      }
+    }, 300);
   },
 
   getAssetsForProject: async () => {
@@ -416,3 +454,23 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
     }
   }
 }));
+
+// Helper: get video duration from a File via metadata
+async function getVideoDurationFromFile(file: File): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    try {
+      const url = URL.createObjectURL(file);
+      const v = document.createElement('video');
+      const cleanup = () => URL.revokeObjectURL(url);
+      v.preload = 'metadata';
+      v.onloadedmetadata = () => {
+        try { resolve(Math.round(v.duration * 1000)); } finally { cleanup(); }
+      };
+      v.onerror = (e) => { cleanup(); reject(e); };
+      v.src = url;
+      v.load();
+    } catch (e) {
+      reject(e);
+    }
+  });
+}

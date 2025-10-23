@@ -439,38 +439,58 @@ export function AutoFitFrame({ aspect, showGrid, showSafeArea, children }: Props
                   >
                     {/* Media Content - Full Frame */}
                     {current.asset.type === "image" ? (
-                      <img
-                        key={mediaKey}
-                        src={current.asset.url}
-                        alt={current.asset.name}
-                        className="w-full h-full object-contain"
-                        draggable={false}
-                      />
+                      current.asset.url.startsWith('missing:') ? (
+                        <div className="flex h-full items-center justify-center text-white/40 text-sm">
+                          <div className="text-center">
+                            <div className="text-lg mb-2">📁</div>
+                            <div>Image file missing</div>
+                            <div className="text-xs mt-1">{current.asset.name}</div>
+                          </div>
+                        </div>
+                      ) : (
+                        <img
+                          key={mediaKey}
+                          src={current.asset.url}
+                          alt={current.asset.name}
+                          className="w-full h-full object-contain"
+                          draggable={false}
+                        />
+                      )
                     ) : current.asset.type === "video" ? (
-                      <video
-                        key={mediaKey}
-                        ref={videoRef}
-                        src={current.asset.url}
-                        className="w-full h-full object-contain"
-                        muted={false}
-                        playsInline
-                        preload="metadata"
-                        controls={false}
-                        onLoadedMetadata={() => {
-                          console.log('🎬 Video metadata loaded in player:', {
-                            duration: videoRef.current?.duration,
-                            width: videoRef.current?.videoWidth,
-                            height: videoRef.current?.videoHeight,
-                            src: videoRef.current?.src
-                          });
-                        }}
-                        onCanPlay={() => {
-                          console.log('🎬 Video can play in player');
-                        }}
-                        onError={(e) => {
-                          console.error('❌ Video error in player:', e);
-                        }}
-                      />
+                      current.asset.url.startsWith('missing:') ? (
+                        <div className="flex h-full items-center justify-center text-white/40 text-sm">
+                          <div className="text-center">
+                            <div className="text-lg mb-2">📁</div>
+                            <div>Video file missing</div>
+                            <div className="text-xs mt-1">{current.asset.name}</div>
+                          </div>
+                        </div>
+                      ) : (
+                        <video
+                          key={mediaKey}
+                          ref={videoRef}
+                          src={current.asset.url}
+                          className="w-full h-full object-contain"
+                          muted={false}
+                          playsInline
+                          preload="metadata"
+                          controls={false}
+                          onLoadedMetadata={() => {
+                            console.log('🎬 Video metadata loaded in player:', {
+                              duration: videoRef.current?.duration,
+                              width: videoRef.current?.videoWidth,
+                              height: videoRef.current?.videoHeight,
+                              src: videoRef.current?.src
+                            });
+                          }}
+                          onCanPlay={() => {
+                            console.log('🎬 Video can play in player');
+                          }}
+                          onError={(e) => {
+                            console.error('❌ Video error in player:', e);
+                          }}
+                        />
+                      )
                     ) : (
                       <div className="flex h-full items-center justify-center text-white/40 text-sm">
                         Unsupported asset on video track

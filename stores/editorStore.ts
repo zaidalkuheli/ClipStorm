@@ -437,6 +437,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   replaceSceneAsset: (sceneId, newAssetId) => {
     const { scenes } = get();
     const asset = useAssetsStore.getState().getById(newAssetId);
+
+    // Immediate update: swap assetId and label only
     set(state => ({
       scenes: state.scenes.map(s => s.id === sceneId ? {
         ...s,
@@ -445,6 +447,131 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         label: s.label && s.label.trim().length > 0 ? s.label : (asset?.name || s.label)
       } : s)
     }));
+
+    // If the new asset is a video, determine its actual duration and clamp the scene length
+    if (asset && asset.type === 'video') {
+      const applyClampWithDuration = (durationMs: number) => {
+        // Ignore invalid durations
+        if (!isFinite(durationMs) || durationMs <= 0) return;
+
+        const fps = get().fps;
+
+        set(state => {
+          const scenes = state.scenes.map(s => ({ ...s }));
+          const idx = scenes.findIndex(sc => sc.id === sceneId);
+          if (idx < 0) return { scenes: state.scenes };
+
+          const cur = scenes[idx];
+
+          // Frame-accurate clamp: scene duration cannot exceed video duration
+          const startF = cur.startF ?? msToFrames(cur.startMs, fps);
+          const curDurF = cur.durF ?? msToFrames(cur.endMs - cur.startMs, fps);
+          const maxDurF = msToFrames(durationMs, fps);
+          const newDurF = Math.max(0, Math.min(curDurF, maxDurF));
+
+          cur.originalDurationMs = Math.round(durationMs);
+          cur.startF = startF;
+          cur.durF = newDurF;
+          // Sync ms from frames
+          cur.startMs = framesToMs(cur.startF, fps);
+          cur.endMs = framesToMs(cur.startF + cur.durF, fps);
+
+          // If linked, ensure links are valid after clamping; otherwise break the link(s)
+          // Right link: if cur no longer touches next.startMs exactly, break the link
+          if (cur.linkRightId) {
+            const nextIdx = scenes.findIndex(sc => sc.id === cur.linkRightId);
+            if (nextIdx >= 0) {
+              const next = scenes[nextIdx];
+              const touchesRight = cur.endMs === next.startMs;
+              if (!touchesRight) {
+                if (next.linkLeftId === cur.id) next.linkLeftId = null;
+                cur.linkRightId = null;
+              }
+            } else {
+              cur.linkRightId = null;
+            }
+          }
+
+          // Left link: startMs shouldn't change here, but defensively ensure validity
+          if (cur.linkLeftId) {
+            const prevIdx = scenes.findIndex(sc => sc.id === cur.linkLeftId);
+            if (prevIdx >= 0) {
+              const prev = scenes[prevIdx];
+              const touchesLeft = prev.endMs === cur.startMs;
+              if (!touchesLeft) {
+                if (prev.linkRightId === cur.id) prev.linkRightId = null;
+                cur.linkLeftId = null;
+              }
+            } else {
+              cur.linkLeftId = null;
+            }
+          }
+
+          return { scenes };
+        });
+      };
+
+      // Synchronous clamp if we already know the duration from assets store
+      if (typeof asset.durationMs === 'number' && isFinite(asset.durationMs) && asset.durationMs > 0) {
+        applyClampWithDuration(asset.durationMs);
+      }
+
+      // Prefer file when available for accurate metadata; otherwise try URL (skip missing placeholders)
+      const tryFromFile = async () => {
+        try {
+          if (!asset.file) return false;
+          const url = URL.createObjectURL(asset.file);
+          await new Promise<void>((resolve, reject) => {
+            const v = document.createElement('video');
+            const cleanup = () => { URL.revokeObjectURL(url); };
+            v.preload = 'metadata';
+            v.onloadedmetadata = () => {
+              try { applyClampWithDuration(Math.round(v.duration * 1000)); } finally { cleanup(); }
+              resolve();
+            };
+            v.onerror = (e) => { cleanup(); reject(e); };
+            v.src = url;
+            v.load();
+          });
+          return true;
+        } catch (e) {
+          console.warn('🎬 Failed to read video metadata from file; will try URL fallback', e);
+          return false;
+        }
+      };
+
+      const tryFromUrl = async () => {
+        try {
+          if (!asset.url || asset.url.startsWith('missing:')) return false;
+          await new Promise<void>((resolve, reject) => {
+            const v = document.createElement('video');
+            v.preload = 'metadata';
+            v.onloadedmetadata = () => {
+              applyClampWithDuration(Math.round(v.duration * 1000));
+              resolve();
+            };
+            v.onerror = (e) => reject(e);
+            v.src = asset.url;
+            v.load();
+          });
+          return true;
+        } catch (e) {
+          console.warn('🎬 Failed to read video metadata from URL', e);
+          return false;
+        }
+      };
+
+      // Kick off async metadata probing (file first, then URL)
+      (async () => {
+        const ok = await tryFromFile();
+        if (!ok) await tryFromUrl();
+      })();
+    } else {
+      // Non-video replacement: clear any previous video constraint to avoid accidental limits
+      set(state => ({
+        scenes: state.scenes.map(s => s.id === sceneId ? { ...s, originalDurationMs: undefined } : s)
+      }));
+    }
   },
 
   // Replace the asset bound to an audio clip; keep timing and kind
