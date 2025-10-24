@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/Button";
 import { X, Download, Music, Film, CheckCircle } from "lucide-react";
 import { ClientOnly } from "@/components/ui/ClientOnly";
 import { renderTimelineToWav } from "@/lib/audioRender";
-import { renderTimelineToWebM, isWebCodecsSupported, CancellationToken } from "@/lib/videoRender";
+import { renderTimelineToWebM, isWebCodecsSupported, CancellationToken, ExportCancelledError } from "@/lib/videoRender";
 import { useEditorStore } from "@/stores/editorStore";
 
 interface ExportModalProps {
@@ -66,15 +66,15 @@ export function ExportModal({ isOpen, onClose }: ExportModalProps) {
       showToast('Video exported successfully!');
       onClose();
     } catch (error) {
+      // Handle cancellation gracefully without logging as an error
+      if (error instanceof ExportCancelledError) {
+        showToast('Export cancelled');
+        return; // Don't log cancellation as an error
+      }
+      
       console.error('🎬 Video export failed:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      
-      // Check if it was a cancellation
-      if (errorMessage.includes('cancelled')) {
-        showToast('Export cancelled');
-      } else {
         showToast(`Export failed: ${errorMessage}`);
-      }
     } finally {
       setIsExporting(false);
       setExportProgress(0);

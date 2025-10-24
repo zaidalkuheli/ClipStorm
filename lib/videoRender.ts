@@ -26,6 +26,16 @@ export type ProgressCallback = (progress: {
 }) => void;
 
 /**
+ * Custom error class for export cancellation
+ */
+export class ExportCancelledError extends Error {
+  constructor() {
+    super('Export cancelled by user');
+    this.name = 'ExportCancelledError';
+  }
+}
+
+/**
  * Cancellation token for aborting video export
  */
 export class CancellationToken {
@@ -234,7 +244,7 @@ export async function renderTimelineToWebM(opts: {
   for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
     if (cancellationToken?.cancelled) {
       try { encoder.close(); } catch {}
-      throw new Error('Export cancelled by user');
+      throw new ExportCancelledError();
     }
 
     const tMs = (frameIndex / fps) * 1000;
